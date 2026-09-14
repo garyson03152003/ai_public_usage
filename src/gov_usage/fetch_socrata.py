@@ -98,29 +98,37 @@ def _fetch_with_retry(source: dict, date_filter: str, app_token: str | None, lab
     return None
 
 
-def fetch_source_year(source: dict, year: int, app_token: str | None, max_retries: int = 3) -> Path | None:
+def fetch_source_year(source: dict, year: int, app_token: str | None, max_retries: int = 3, force: bool = False) -> Path | None:
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = RAW_DIR / f"{source['dataset_id']}_{year}.csv"
+    if out_path.exists() and not force:
+        print(f"SKIP (already fetched): '{source['name']}' / {year} -> {out_path}")
+        return out_path
+
     df = _fetch_with_retry(source, f"%/{year}", app_token, str(year), max_retries)
     if df is None:
         return None
     df["year"] = year
 
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = RAW_DIR / f"{source['dataset_id']}_{year}.csv"
     df.to_csv(out_path, index=False)
     print(f"Saved {len(df)} status rows ({int(df['n'].sum())} tickets) from '{source['name']}' / {year} -> {out_path}")
     return out_path
 
 
-def fetch_source_month(source: dict, year: int, month: int, app_token: str | None, max_retries: int = 3) -> Path | None:
+def fetch_source_month(source: dict, year: int, month: int, app_token: str | None, max_retries: int = 3, force: bool = False) -> Path | None:
     label = f"{year}-{month:02d}"
+    RAW_DIR_MONTHLY.mkdir(parents=True, exist_ok=True)
+    out_path = RAW_DIR_MONTHLY / f"{source['dataset_id']}_{label}.csv"
+    if out_path.exists() and not force:
+        print(f"SKIP (already fetched): '{source['name']}' / {label} -> {out_path}")
+        return out_path
+
     df = _fetch_with_retry(source, f"{month:02d}/%/{year}", app_token, label, max_retries)
     if df is None:
         return None
     df["year"] = year
     df["month"] = month
 
-    RAW_DIR_MONTHLY.mkdir(parents=True, exist_ok=True)
-    out_path = RAW_DIR_MONTHLY / f"{source['dataset_id']}_{label}.csv"
     df.to_csv(out_path, index=False)
     print(f"Saved {len(df)} status rows ({int(df['n'].sum())} tickets) from '{source['name']}' / {label} -> {out_path}")
     return out_path
@@ -137,6 +145,12 @@ def main() -> None:
         help="Socrata app token (optional but recommended; unauthenticated requests are slower and more heavily throttled). "
         "Get one free at the portal's developer settings page.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-fetch periods even if their output file already exists (default: skip already-fetched periods, so an "
+        "interrupted run can just be re-invoked to resume where it left off)",
+    )
     args = parser.parse_args()
 
     sources = load_sources()
@@ -150,9 +164,9 @@ def main() -> None:
             if args.granularity == "month":
                 last_month = today.month if year == today.year else 12
                 for month in range(1, last_month + 1):
-                    fetch_source_month(source, year, month, app_token=args.app_token)
+                    fetch_source_month(source, year, month, app_token=args.app_token, force=args.force)
             else:
-                fetch_source_year(source, year, app_token=args.app_token)
+                fetch_source_year(source, year, app_token=args.app_token, force=args.force)
 
 
 if __name__ == "__main__":
