@@ -73,9 +73,14 @@ def local_linear_jump(df: pd.DataFrame, outcome_col: str, bandwidth: int, cluste
     d["weight"] = (1 - d["event_time"].abs() / bandwidth).clip(lower=1e-6)
     d["interaction"] = d["treated"] * d["event_time"]
 
-    model = smf.wls(f"{outcome_col} ~ treated + event_time + interaction", data=d, weights=d["weight"]).fit(
-        cov_type="cluster", cov_kwds={"groups": d[cluster_col]}
-    )
+    wls = smf.wls(f"{outcome_col} ~ treated + event_time + interaction", data=d, weights=d["weight"])
+    if d[cluster_col].nunique() < 2:
+        # Cluster-robust SEs need >=2 clusters; a single-state outcome
+        # like the NYC parking data has nothing to cluster across.
+        print(f"Note: outcome '{outcome_col}' has only {d[cluster_col].nunique()} state(s) -- using HC1 robust SEs instead of state-clustered SEs.")
+        model = wls.fit(cov_type="HC1")
+    else:
+        model = wls.fit(cov_type="cluster", cov_kwds={"groups": d[cluster_col]})
     return LocalLinearResult(jump=model.params["treated"], std_err=model.bse["treated"], n_obs=int(model.nobs))
 
 

@@ -63,6 +63,19 @@ def test_event_study_recovers_known_jump():
     assert pre_launch["coef"].mean() == pytest.approx(0.0, abs=0.6)
 
 
+def test_event_study_handles_single_state_outcome():
+    """A regression test: NYC's parking-appeal outcome only has data for
+    one state, which made cluster-robust SEs divide by zero (n_clusters -
+    1 = 0) the first time this ran against real data. Should fall back to
+    HC1 robust SEs instead of crashing."""
+    panel = _synthetic_panel(true_jump=5.0)
+    single_state_panel = panel[panel["state"] == "California"]
+
+    result = run_event_study(single_state_panel, EVENT, "y", window=6)
+    post = result[result["event_time"].between(0, 4)]
+    assert post["coef"].mean() == pytest.approx(5.0, abs=0.6)
+
+
 def test_fuzzy_rd_recovers_known_ratio():
     rng_state = 42
     # First-stage variable jumps by 20, outcome jumps by 8 -> true LATE = 0.4

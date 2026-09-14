@@ -204,9 +204,13 @@ python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_2
 # The parking outcome only has data for New York, so after dropping
 # other states' NaN rows the "state fixed effects" term in
 # event_study.py/stacked_event_study.py has just one category and
-# contributes nothing beyond the intercept -- this still runs, but reads
-# as New York's own average change, not a cross-state comparison.
-python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appeal_records
+# contributes nothing beyond the intercept. Worse for a SINGLE event: with
+# one state, one observation per relative-month, and one dummy per
+# relative-month, the model is fully saturated (R-squared = 1.0, SEs are
+# NaN) -- it fits perfectly and says nothing. Only the pooled/stacked
+# version below is actually informative for this outcome, since pooling
+# 12 events supplies multiple observations per relative-month bin.
+python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appeal_records  # degenerate, see above
 
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
@@ -260,6 +264,41 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
 - The actual estimates need the monthly Trends fetch to have reached each
   event's date — for events from late 2022 onward this means waiting for
   most of the ~1600-request monthly fetch to complete.
+- Cluster-robust (by-state) standard errors need at least 2 clusters; the
+  parking outcome only has one (New York), which divides by zero in
+  statsmodels' small-cluster correction. All three scripts detect a
+  single-cluster outcome and fall back to HC1 heteroskedasticity-robust
+  SEs instead, printing a note when they do. A worse case for parking
+  specifically: `event_study.py`/`fuzzy_rd.py` on a *single* event with
+  a *single* state have only one observation per relative-month, so a
+  full set of event-time dummies fits it exactly (R-squared = 1.0, SEs
+  are NaN) — the per-event parking regressions are mathematically
+  uninformative, not just noisy. Only `stacked_event_study.py`'s pooled
+  version, which supplies multiple observations per relative-month by
+  combining all 12 events, produces a meaningful result for this outcome.
+
+### What the results actually show (last run against real data)
+
+- **AI search interest**: jumps clearly and significantly after launch in
+  the pooled analysis (pre-period near zero to negative, post-period
+  +1.8 to +6.7, all p<0.001). Expected, and a good sanity check that the
+  pipeline works.
+- **UI first-payment processing time**: no significant or coherent
+  post-launch pattern in the pooled analysis (most p>0.19, sign flips
+  between periods) — a credible null, not a data gap. Individual
+  single-event checks (ChatGPT, GPT-4) show significant coefficients
+  *before* the launch date even happens (a pre-trend), which is exactly
+  the kind of noise the pooled design exists to average out.
+- **NYC parking-ticket appeals**: also a null in the pooled analysis — no
+  coefficient post-launch reaches significance (all p>0.3), no
+  consistent direction. The individual-event regressions are degenerate
+  (see above) rather than merely noisy, and the individual fuzzy-RD
+  estimates have standard errors several times larger than their point
+  estimates — uninformative, not evidence of an effect either way.
+- Bottom line: strong evidence AI launches move search interest; no
+  credible evidence, in either government-usage outcome tested, that
+  they shift how fast state agencies process unemployment claims or how
+  NYC's parking-ticket appeals process runs.
 
 ## Tests
 

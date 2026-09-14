@@ -142,7 +142,18 @@ def run_stacked_event_study(
     if control_cols:
         formula += " + " + " + ".join(control_cols)
 
-    model = smf.ols(formula, data=stacked).fit(cov_type="cluster", cov_kwds={"groups": stacked["state"]})
+    ols = smf.ols(formula, data=stacked)
+    n_clusters = stacked["state"].nunique()
+    if n_clusters < 2:
+        # Cluster-robust SEs need >=2 clusters (the standard small-cluster
+        # correction divides by n_clusters - 1); with a single-state
+        # outcome like the NYC parking data there's nothing to cluster
+        # across, so fall back to heteroskedasticity-robust SEs instead
+        # of erroring or silently reporting bogus clustered ones.
+        print(f"Note: outcome '{outcome_col}' has only {n_clusters} state(s) -- using HC1 robust SEs instead of state-clustered SEs.")
+        model = ols.fit(cov_type="HC1")
+    else:
+        model = ols.fit(cov_type="cluster", cov_kwds={"groups": stacked["state"]})
 
     rows = []
     conf_int = model.conf_int(alpha=0.05)
