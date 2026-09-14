@@ -1,43 +1,62 @@
 # City/state open-data (Socrata "SODA API") sources for parking-ticket
-# appeal / administrative-hearing data, consumed by fetch_socrata.py.
+# appeal / hearing data, consumed by fetch_socrata.py.
 #
 # Each entry:
 #   name:          human-readable label
 #   domain:        Socrata site domain, e.g. data.cityofnewyork.us
 #   dataset_id:    the 4x4 dataset identifier (from the dataset's URL)
 #   state:         the state this city/agency sits in (for roll-up)
+#   date_field:    text column holding the ticket's issue date, format MM/DD/YYYY
+#                  (these portals store it as plain text, not a real date type,
+#                  so year filtering uses a "...like '%/<year>'" suffix match)
+#   status_field:  column whose value says how the ticket was resolved
+#   status_filter: substrings of status_field to keep (case-insensitive OR)
 #   notes:         what the dataset actually contains / caveats
 #
-# Verified sources:
-#   - NYC OATH Hearings Division Case Status was confirmed via web search
-#     (multiple independent mirrors cite dataset id jz4z-kudi) but its exact
-#     columns were NOT inspected live -- verify column names in
-#     fetch_socrata.py's field_map before relying on the output.
+# Verified against the live Socrata API (see README):
+#   - NYC "Open Parking and Camera Violations" (nc67-uf89) has a
+#     `violation_status` column with real hearing/appeal outcomes:
+#     HEARING HELD-GUILTY/NOT GUILTY/GUILTY REDUCTION, HEARING ADJOURNMENT,
+#     HEARING PENDING, HEARING HELD-REINSTATEMENT, APPEAL AFFIRMED/REVERSED/
+#     ABANDONED/MODIFIED. This is NYC's actual parking-ticket appeal data,
+#     not just a generic administrative-hearings dataset.
+#   - The table is large (hundreds of millions of rows) and issue_date is
+#     plain text, so aggregating by year server-side (see fetch_socrata.py)
+#     takes on the order of a couple of minutes per year without a Socrata
+#     app token; get a free one from the portal's developer settings and
+#     pass it via --app-token to speed this up.
 #
 # Sources marked "id: null" are placeholders: a specific city/agency is
 # known to publish this kind of data, but a stable dataset id was not
 # confirmed here. Fill in the id yourself after searching the portal
-# (e.g. search "administrative hearings parking" on data.cityofchicago.org)
-# before enabling that entry.
+# (e.g. search "parking ticket" or "administrative hearings" on
+# data.cityofchicago.org) before enabling that entry.
 
 sources:
-  - name: NYC OATH Hearings Division Case Status
+  - name: NYC Open Parking and Camera Violations
     domain: data.cityofnewyork.us
-    dataset_id: jz4z-kudi
+    dataset_id: nc67-uf89
     state: New York
+    date_field: issue_date
+    status_field: violation_status
+    status_filter: ["APPEAL", "HEARING"]
     enabled: true
     notes: >
-      Case-level outcomes for summonses (including parking/camera
-      violations) adjudicated by NYC's Office of Administrative Trials and
-      Hearings. Use the hearing/decision fields to approximate appeal
-      volume and outcome mix; this is NYC-specific, not statewide.
+      Ticket-level parking/camera violations with a violation_status field
+      that records hearing and appeal outcomes. NYC-specific, not
+      statewide. fetch_socrata.py aggregates this to yearly counts per
+      status rather than downloading raw rows.
 
   - name: Chicago Department of Administrative Hearings (parking/traffic)
     domain: data.cityofchicago.org
     dataset_id: null  # TODO: confirm the current dataset id before enabling
     state: Illinois
+    date_field: null
+    status_field: null
+    status_filter: []
     enabled: false
     notes: >
       Chicago publishes parking-ticket issuance data and, separately,
       administrative-hearings data; a search on data.cityofchicago.org for
-      "administrative hearings" should surface the current dataset id.
+      "administrative hearings" should surface the current dataset id and
+      its date/status column names.

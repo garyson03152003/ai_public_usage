@@ -1,29 +1,36 @@
 """Fetch state-level civil / small-claims court caseload data.
 
-There is no single clean nationwide API for this. Two complementary paths
-are implemented:
+There is no single clean nationwide API for this, and it's gotten harder:
+as of this writing (2026) data.gov has been re-platformed away from
+classic CKAN. `catalog.data.gov/api/3/action/*` -- the documented,
+previously-reliable way to script downloads -- now 404s across the board,
+even for unrelated, definitely-still-published datasets, and the old
+"state-court-statistics-series-a021b" dataset page itself now 404s too.
+This was confirmed against the live site, not assumed.
 
-1. `fetch_datagov()` -- the DOJ/BJS "State Court Statistics Series" dataset
-   is catalogued on data.gov's CKAN API (package id
-   "state-court-statistics-series-a021b"). CKAN's package_show endpoint
-   returns resource URLs (usually CSV/PDF/SPSS) that we download as-is into
-   data/raw/court_stats/. This is fully automatable.
+Two paths are implemented:
 
-2. `normalize_manual_export()` -- the National Center for State Courts'
-   Court Statistics Project (courtstatistics.org, "CSP STAT") publishes the
-   richer, more current small-claims/civil caseload and time-to-disposition
-   figures, but only through an interactive Tableau-style dashboard with
-   manual CSV/Excel export -- there is no stable public REST endpoint to
-   automate. Export the state(s) and case type(s) you need from
+1. `fetch_datagov()` -- kept as a best-effort attempt at the old CKAN API,
+   in case it comes back or is restored at the same path for you. It fails
+   fast with a clear error pointing here if the API isn't there. If you hit
+   that, search https://catalog.data.gov/ by hand for the current DOJ/BJS
+   "State Court Statistics Series" (or equivalent) dataset and either
+   adapt this function's URL or download the file manually and use path 2.
+
+2. `normalize_manual_export()` -- the reliable path. The National Center
+   for State Courts' Court Statistics Project (courtstatistics.org,
+   "CSP STAT") publishes richer, more current small-claims/civil caseload
+   and time-to-disposition figures, but only through an interactive
+   Tableau-style dashboard with manual CSV/Excel export -- there was never
+   a stable public REST endpoint for this one. Export the state(s) and
+   case type(s) you need from
    https://www.courtstatistics.org/court-statistics/interactive-caseload-data-displays/csp-stat
    and point this function at the exported file; it standardizes whatever
    columns you give it via a small mapping you fill in once you see your
    export's actual headers.
 
-Requires network access to catalog.data.gov (path 1 only). This is NOT
-reachable from this project's default sandboxed dev environment -- run
-path 1 from a machine/CI job with normal internet access. Path 2 needs no
-network access here since it only reformats a file you already downloaded.
+Path 1 needs network access to catalog.data.gov. Path 2 needs no network
+access here since it only reformats a file you already downloaded.
 """
 
 from __future__ import annotations
@@ -57,6 +64,14 @@ def fetch_datagov(package_id: str = DATAGOV_PACKAGE_ID) -> list[Path]:
     """
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     resp = requests.get(DATAGOV_API, params={"id": package_id}, timeout=30)
+    if resp.status_code == 404:
+        raise RuntimeError(
+            "catalog.data.gov's CKAN API (or this package id) is not available "
+            "-- confirmed dead as of 2026, see this module's docstring. Find the "
+            "current dataset by hand at https://catalog.data.gov/ and either "
+            "update DATAGOV_API/DATAGOV_PACKAGE_ID or download it manually and "
+            "use normalize_manual_export() instead."
+        )
     resp.raise_for_status()
     payload = resp.json()
     if not payload.get("success"):
