@@ -101,10 +101,18 @@ and normalize them with that function — see the docstring in
   plain text, so `fetch_socrata.py` aggregates counts per
   year/outcome server-side rather than downloading raw rows; expect each
   year to take a couple of minutes unauthenticated (pass a free Socrata
-  app token via `--app-token` to speed this up). A placeholder for Chicago
-  is in `sources.yaml` pending someone confirming its current dataset id.
-  Treat this part of the combined table as an NYC case study, not a
-  50-state comparison.
+  app token via `--app-token` to speed this up).
+
+  The largest city in every other state was checked directly (live API
+  queries, not just search results) for an equivalent dataset — see the
+  research notes at the top of `sources.yaml`. None qualified: most cities
+  have no open-data portal or run ArcGIS Hub/CKAN instead of Socrata, and
+  the few genuine Socrata parking-citation datasets found (LA, New
+  Orleans, Kansas City, Richmond, Seattle, Dallas, Austin, Providence,
+  Philadelphia) only track issuance/payment, not hearing or appeal
+  outcomes. NYC appears to be a real outlier in publishing this level of
+  detail, so treat this part of the combined table as an NYC case study,
+  not a 50-state comparison, until a new source turns up.
 
 `data/processed/combined_state_data.csv` includes a `data_coverage_notes`
 column per (state, year) row (e.g. `trends,court-stats,no-parking`) so

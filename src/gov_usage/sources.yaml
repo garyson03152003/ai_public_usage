@@ -26,11 +26,33 @@
 #     app token; get a free one from the portal's developer settings and
 #     pass it via --app-token to speed this up.
 #
-# Sources marked "id: null" are placeholders: a specific city/agency is
-# known to publish this kind of data, but a stable dataset id was not
-# confirmed here. Fill in the id yourself after searching the portal
-# (e.g. search "parking ticket" or "administrative hearings" on
-# data.cityofchicago.org) before enabling that entry.
+# ---------------------------------------------------------------------------
+# Coverage research: the largest city in every other state was checked
+# (largest-city open-data portal, live API queries, not just search
+# snippets) for a Socrata dataset with a genuine hearing/appeal-outcome
+# field like NYC's. None qualified. Findings, so this isn't silently
+# abandoned as an unexplained TODO:
+#   - Most cities either have no open-data portal at all (e.g. Jacksonville,
+#     Fargo, Cheyenne, West Virginia's cities), or run Esri ArcGIS Hub or
+#     CKAN instead of Socrata (Atlanta, Denver, DC, Boston, Chicago's
+#     administrative-hearings side, Nashville, Salt Lake City, Milwaukee,
+#     and many more) -- a different platform/API this project doesn't
+#     currently ingest.
+#   - A handful ARE genuine, live Socrata portals with a parking-citation
+#     dataset (LA, New Orleans, Kansas City, Richmond VA, Seattle, Dallas,
+#     Austin, Providence) but every one of those datasets only has
+#     issuance/payment fields (ticket number, date, fine, paid/unpaid) --
+#     no hearing- or appeal-outcome field the way NYC's does.
+#   - Philadelphia's parking-violations data (via CARTO/OpenDataPhilly,
+#     not Socrata) is real and live but is also issuance-only.
+#   - Chicago's well-known ProPublica parking-ticket-with-hearing-outcome
+#     analysis was built from a FOIA request, not the public SODA API --
+#     data.cityofchicago.org has no equivalent dataset to pull from.
+# So as of this research pass, NYC is the only state/city in this project
+# with a scriptable, genuinely appeal-resolved parking-ticket data source.
+# If you find a new one (or add support for ArcGIS/CKAN portals), add it
+# below following the NYC entry's shape.
+# ---------------------------------------------------------------------------
 
 sources:
   - name: NYC Open Parking and Camera Violations
@@ -46,17 +68,3 @@ sources:
       that records hearing and appeal outcomes. NYC-specific, not
       statewide. fetch_socrata.py aggregates this to yearly counts per
       status rather than downloading raw rows.
-
-  - name: Chicago Department of Administrative Hearings (parking/traffic)
-    domain: data.cityofchicago.org
-    dataset_id: null  # TODO: confirm the current dataset id before enabling
-    state: Illinois
-    date_field: null
-    status_field: null
-    status_filter: []
-    enabled: false
-    notes: >
-      Chicago publishes parking-ticket issuance data and, separately,
-      administrative-hearings data; a search on data.cityofchicago.org for
-      "administrative hearings" should surface the current dataset id and
-      its date/status column names.
