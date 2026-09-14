@@ -96,6 +96,11 @@ def fetch(start_year: int = DEFAULT_START_YEAR, end_year: int | None = None, api
     out_path = RAW_DIR / "bls_unemployment_rate.csv"
     annual.to_csv(out_path, index=False)
     print(f"Wrote {len(annual)} state-year unemployment-rate rows -> {out_path}")
+
+    monthly_out_path = RAW_DIR / "bls_unemployment_rate_monthly.csv"
+    monthly.sort_values(["state", "year", "month"]).to_csv(monthly_out_path, index=False)
+    print(f"Wrote {len(monthly)} state-month unemployment-rate rows -> {monthly_out_path}")
+
     return out_path
 
 

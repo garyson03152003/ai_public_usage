@@ -44,6 +44,11 @@ src/
     fetch_bls_controls.py    # BLS LAUS: state unemployment rate, the control variable for the above
     sources.yaml              # config: which city/state open-data sources to pull
   combine.py                  # merges data/raw/* -> data/processed/combined_state_data.csv (state x year panel)
+  analysis/
+    events.py                 # curated, cited list of major AI model/service launch dates
+    build_panel.py             # monthly trends + monthly UI data -> analysis_panel_state_month.csv
+    event_study.py              # per-event regression: outcome by month relative to launch
+    fuzzy_rd.py                  # local-linear fuzzy RD at the launch date (Wald/IV estimate)
 data/
   raw/          # one subfolder per source, gitignored (regenerate by re-running fetch_*.py)
   processed/    # combined_state_data.csv, gitignored
@@ -165,6 +170,57 @@ and normalize them with that function — see the docstring in
 `data/processed/combined_state_data.csv` includes a `data_coverage_notes`
 column per (state, year) row (e.g. `trends,court-stats,no-parking,unemployment,controls`)
 so gaps are explicit rather than silently blank.
+
+## Event study / fuzzy RD around AI model launches
+
+`src/analysis/` asks a sharper question than "did AI interest and public-
+resource usage both rise over time": does a specific model/service launch
+coincide with a shift in a usage metric, right around that date? This
+needs monthly resolution, which rules out the parking and court-stats
+data (annual only) -- only AI search interest and UI first-payment
+processing time are available monthly, so that's what this analysis uses.
+
+```bash
+# Needs the monthly Trends fetch (see above) and fetch_unemployment.py
+# (which now writes a monthly file too, not just the annual one) already run.
+python -m src.analysis.build_panel   # -> data/processed/analysis_panel_state_month.csv
+
+# Event-study: outcome in each month relative to a launch date, vs. the
+# month right before it, with state fixed effects and clustered SEs.
+python -m src.analysis.event_study --event chatgpt_launch --outcome ai_interest_index
+python -m src.analysis.event_study --event deepseek_r1 --outcome ui_pct_within_21_days --controls unemployment_rate
+
+# Fuzzy RD: local-linear jump in ai_interest_index (first stage) and in a
+# usage outcome (reduced form) right at the launch date, ratio = LATE.
+python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_21_days
+```
+
+- `src/analysis/events.py` — 12 major launches (ChatGPT through Gemini 3),
+  dates checked directly against Wikipedia rather than trusted from a
+  single web search or training memory; some AI-blog sources returned
+  inconsistent/implausible dates for 2025-2026 releases and were
+  discarded. See each event's `source` field.
+- `src/analysis/event_study.py` — one regression per event: outcome ~
+  event-time dummies (relative month, reference = the month before
+  launch) + state fixed effects, clustered by state. Deliberately does
+  **not** include calendar-month/seasonality fixed effects: for a single
+  event, event-time is essentially a stand-in for calendar time itself
+  (each event-time value maps to one, or at most two, actual months), so
+  a full seasonality control isn't separately identified here — see the
+  module docstring. This is descriptive, not causal: it shows the outcome
+  moved around the launch, not that the launch caused it.
+- `src/analysis/fuzzy_rd.py` — local-linear (triangular-kernel) regression
+  discontinuity in months-since-launch, first stage = jump in AI search
+  interest, reduced form = jump in the usage outcome, fuzzy-RD estimate =
+  their ratio (the standard Wald/IV formula). The reported LATE standard
+  error is a delta-method approximation that ignores covariance between
+  the two jump estimates — read it as directional, not exact.
+- Both are validated in `tests/test_analysis.py` against synthetic panels
+  with a known, engineered jump, not just run against real data and
+  eyeballed.
+- The actual estimates need the monthly Trends fetch to have reached each
+  event's date — for events from late 2022 onward this means waiting for
+  most of the ~1600-request monthly fetch to complete.
 
 ## Tests
 

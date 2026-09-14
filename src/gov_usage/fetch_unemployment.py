@@ -60,45 +60,66 @@ def download_raw(url: str = SOURCE_URL) -> Path:
     return out_path
 
 
+def _metrics_from_bucket_sums(grouped: pd.DataFrame, key_cols: list[str]) -> pd.DataFrame:
+    bucket_cols = _intrastate_total_columns()
+    total = grouped[bucket_cols].sum(axis=1)
+    within_21_days = grouped[bucket_cols[:3]].sum(axis=1)  # <=7, 8-14, 15-21
+    weighted_days = sum(grouped[col] * mid for col, mid in zip(bucket_cols, BUCKET_MIDPOINTS))
+
+    out = grouped[key_cols].copy()
+    out["ui_first_payments_total"] = total
+    out["ui_pct_within_21_days"] = (within_21_days / total * 100).where(total > 0)
+    out["ui_avg_days_to_first_payment_approx"] = (weighted_days / total).where(total > 0)
+    return out
+
+
+def _load_raw_with_state_year(raw_path: Path, start_year: int, end_year: int) -> pd.DataFrame:
+    raw = pd.read_csv(raw_path)
+    raw["year"] = pd.to_datetime(raw["rptdate"]).dt.year
+    raw = raw[(raw["year"] >= start_year) & (raw["year"] <= end_year)]
+    raw["state"] = raw["st"].map(normalize_state_name)
+    return raw
+
+
 def summarize_by_state_year(raw_path: Path, start_year: int, end_year: int) -> pd.DataFrame:
     """Aggregate DOL's monthly, bucketed first-payment counts into one row
     per (state, year): total intrastate first payments, the share made
     within 21 days (the de facto federal timeliness benchmark once a
     state's statutory waiting week is accounted for), and an approximate
     average days-to-first-payment from bucket midpoints."""
-    raw = pd.read_csv(raw_path)
-    raw["year"] = pd.to_datetime(raw["rptdate"]).dt.year
-    raw = raw[(raw["year"] >= start_year) & (raw["year"] <= end_year)]
-    raw["state"] = raw["st"].map(normalize_state_name)
-
+    raw = _load_raw_with_state_year(raw_path, start_year, end_year)
     bucket_cols = _intrastate_total_columns()
     yearly = raw.groupby(["state", "year"], as_index=False)[bucket_cols].sum()
-
-    total = yearly[bucket_cols].sum(axis=1)
-    within_21_days = yearly[bucket_cols[:3]].sum(axis=1)  # <=7, 8-14, 15-21
-    weighted_days = sum(yearly[col] * mid for col, mid in zip(bucket_cols, BUCKET_MIDPOINTS))
-
-    out = pd.DataFrame(
-        {
-            "state": yearly["state"],
-            "year": yearly["year"],
-            "ui_first_payments_total": total,
-            "ui_pct_within_21_days": (within_21_days / total * 100).where(total > 0),
-            "ui_avg_days_to_first_payment_approx": (weighted_days / total).where(total > 0),
-        }
-    )
-    return out
+    return _metrics_from_bucket_sums(yearly, ["state", "year"])
 
 
-def fetch(start_year: int = DEFAULT_START_YEAR, end_year: int | None = None) -> Path:
+def summarize_by_state_month(raw_path: Path, start_year: int, end_year: int) -> pd.DataFrame:
+    """Same as summarize_by_state_year but keeps DOL's native monthly
+    resolution (each row of the raw file is already one state-month) --
+    needed for event-study/RD analysis around specific launch dates,
+    where annual aggregation would hide the timing entirely."""
+    raw = _load_raw_with_state_year(raw_path, start_year, end_year)
+    raw["month"] = pd.to_datetime(raw["rptdate"]).dt.month
+    bucket_cols = _intrastate_total_columns()
+    monthly = raw.groupby(["state", "year", "month"], as_index=False)[bucket_cols].sum()
+    return _metrics_from_bucket_sums(monthly, ["state", "year", "month"])
+
+
+def fetch(start_year: int = DEFAULT_START_YEAR, end_year: int | None = None) -> tuple[Path, Path]:
     end_year = end_year or datetime.date.today().year
     raw_path = download_raw()
-    summary = summarize_by_state_year(raw_path, start_year, end_year)
 
-    out_path = RAW_DIR / "eta9050_state_year.csv"
-    summary.to_csv(out_path, index=False)
-    print(f"Wrote {len(summary)} state-year rows -> {out_path}")
-    return out_path
+    yearly = summarize_by_state_year(raw_path, start_year, end_year)
+    yearly_path = RAW_DIR / "eta9050_state_year.csv"
+    yearly.to_csv(yearly_path, index=False)
+    print(f"Wrote {len(yearly)} state-year rows -> {yearly_path}")
+
+    monthly = summarize_by_state_month(raw_path, start_year, end_year)
+    monthly_path = RAW_DIR / "eta9050_state_month.csv"
+    monthly.to_csv(monthly_path, index=False)
+    print(f"Wrote {len(monthly)} state-month rows -> {monthly_path}")
+
+    return yearly_path, monthly_path
 
 
 if __name__ == "__main__":
