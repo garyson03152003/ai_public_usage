@@ -1,0 +1,43 @@
+# City/state open-data (Socrata "SODA API") sources for parking-ticket
+# appeal / administrative-hearing data, consumed by fetch_socrata.py.
+#
+# Each entry:
+#   name:          human-readable label
+#   domain:        Socrata site domain, e.g. data.cityofnewyork.us
+#   dataset_id:    the 4x4 dataset identifier (from the dataset's URL)
+#   state:         the state this city/agency sits in (for roll-up)
+#   notes:         what the dataset actually contains / caveats
+#
+# Verified sources:
+#   - NYC OATH Hearings Division Case Status was confirmed via web search
+#     (multiple independent mirrors cite dataset id jz4z-kudi) but its exact
+#     columns were NOT inspected live -- verify column names in
+#     fetch_socrata.py's field_map before relying on the output.
+#
+# Sources marked "id: null" are placeholders: a specific city/agency is
+# known to publish this kind of data, but a stable dataset id was not
+# confirmed here. Fill in the id yourself after searching the portal
+# (e.g. search "administrative hearings parking" on data.cityofchicago.org)
+# before enabling that entry.
+
+sources:
+  - name: NYC OATH Hearings Division Case Status
+    domain: data.cityofnewyork.us
+    dataset_id: jz4z-kudi
+    state: New York
+    enabled: true
+    notes: >
+      Case-level outcomes for summonses (including parking/camera
+      violations) adjudicated by NYC's Office of Administrative Trials and
+      Hearings. Use the hearing/decision fields to approximate appeal
+      volume and outcome mix; this is NYC-specific, not statewide.
+
+  - name: Chicago Department of Administrative Hearings (parking/traffic)
+    domain: data.cityofchicago.org
+    dataset_id: null  # TODO: confirm the current dataset id before enabling
+    state: Illinois
+    enabled: false
+    notes: >
+      Chicago publishes parking-ticket issuance data and, separately,
+      administrative-hearings data; a search on data.cityofchicago.org for
+      "administrative hearings" should surface the current dataset id.
