@@ -48,7 +48,8 @@ src/
     events.py                 # curated, cited list of major AI model/service launch dates
     build_panel.py             # monthly trends + monthly UI data -> analysis_panel_state_month.csv
     event_study.py              # per-event regression: outcome by month relative to launch
-    fuzzy_rd.py                  # local-linear fuzzy RD at the launch date (Wald/IV estimate)
+    stacked_event_study.py       # pooled regression across all events at once (more reliable)
+    fuzzy_rd.py                   # local-linear fuzzy RD at the launch date (Wald/IV estimate)
 data/
   raw/          # one subfolder per source, gitignored (regenerate by re-running fetch_*.py)
   processed/    # combined_state_data.csv, gitignored
@@ -193,6 +194,12 @@ python -m src.analysis.event_study --event deepseek_r1 --outcome ui_pct_within_2
 # Fuzzy RD: local-linear jump in ai_interest_index (first stage) and in a
 # usage outcome (reduced form) right at the launch date, ratio = LATE.
 python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_21_days
+
+# Stacked/pooled event study across all 12 launches at once, instead of
+# one noisy regression per launch -- see below for why this is the more
+# reliable version.
+python -m src.analysis.stacked_event_study --outcome ai_interest_index
+python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --controls unemployment_rate --window 6
 ```
 
 - `src/analysis/events.py` — 12 major launches (ChatGPT through Gemini 3),
@@ -215,9 +222,28 @@ python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_2
   their ratio (the standard Wald/IV formula). The reported LATE standard
   error is a delta-method approximation that ignores covariance between
   the two jump estimates — read it as directional, not exact.
-- Both are validated in `tests/test_analysis.py` against synthetic panels
-  with a known, engineered jump, not just run against real data and
-  eyeballed.
+- `src/analysis/stacked_event_study.py` — the more reliable version: pools
+  all 12 launches into one regression instead of running event_study.py
+  once per launch. This has two real advantages, not just "more data":
+  (1) each event-time bin now averages over many launches x many states
+  instead of one launch x many states, and (2) because different launches
+  fall in different calendar months, calendar-month fixed effects *are*
+  separately identified here even though they aren't in the single-event
+  version — pooling breaks the collinearity that forced dropping them
+  above. The catch: this project's 12 events are packed close together
+  (as little as 1 month apart in a few places), so a wide fixed window
+  would let one launch's post-period bleed into the next launch's
+  pre-period baseline. By default each event's window is trimmed to stop
+  at its nearest neighbor's own month (`--no-trim` disables this); this
+  prevents double-counting a calendar month as both "after A" and "before
+  B", but doesn't guarantee full independence from a neighboring launch's
+  lingering effect.
+- All three are validated in `tests/test_analysis.py` against synthetic
+  panels with a known, engineered jump, not just run against real data
+  and eyeballed — including a check that pooling multiple events (landing
+  in different calendar months) does let seasonality be identified where
+  a single event provably can't, and a check on the window-trimming math
+  itself using this project's actual event gaps.
 - The actual estimates need the monthly Trends fetch to have reached each
   event's date — for events from late 2022 onward this means waiting for
   most of the ~1600-request monthly fetch to complete.
