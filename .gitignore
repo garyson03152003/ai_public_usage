@@ -12,3 +12,10 @@ __pycache__/
 /data/raw/controls/**
 !/data/raw/court_stats/.gitkeep
 !/data/raw/controls/.gitkeep
+
+# TEMPORARY: a long-running monthly parking-ticket fetch is in progress
+# (~80 queries, ~2-3 min each -- a multi-hour run) and writes new files
+# continuously. Ignoring it here to avoid a flood of tiny incremental
+# commits. Remove this line and commit the finished directory once
+# `python -m src.gov_usage.fetch_socrata --granularity month` completes.
+/data/raw/parking_tickets_monthly/**
