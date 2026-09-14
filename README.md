@@ -9,8 +9,11 @@ Data pipeline that compiles two things side by side, by US state, for
    ChatGPT/OpenAI, Gemini, Copilot, Perplexity, DeepSeek, Llama, Grok,
    Mistral, ...).
 2. **Public-resource usage** — state-level civil/small-claims court
-   caseloads and processing times, plus NYC parking-ticket hearing/appeal
-   volume as an illustrative city case study.
+   caseloads and processing times, NYC parking-ticket hearing/appeal
+   volume as an illustrative city case study, and state unemployment-
+   insurance first-payment processing time, alongside a control variable
+   (state unemployment rate) so the UI processing-time numbers aren't
+   compared without accounting for claim-volume pressure.
 
 The two are merged into one state x year panel
 (`data/processed/combined_state_data.csv`) for exploratory analysis.
@@ -36,6 +39,8 @@ src/
   gov_usage/
     fetch_court_stats.py     # data.gov CKAN attempt + manual-export normalizer for court caseload data
     fetch_socrata.py         # Socrata (SODA API) fetcher, aggregated per year, for city portals
+    fetch_unemployment.py    # DOL ETA 9050: UI first-payment processing time, by state x year
+    fetch_bls_controls.py    # BLS LAUS: state unemployment rate, the control variable for the above
     sources.yaml              # config: which city/state open-data sources to pull
   combine.py                  # merges data/raw/* -> data/processed/combined_state_data.csv (state x year panel)
 data/
@@ -62,6 +67,8 @@ python -m src.trends.fetch_trends --terms "Claude AI" "ChatGPT" --start-year 202
 # 2. Government usage data
 python -m src.gov_usage.fetch_court_stats          # best-effort data.gov download attempt, see caveat below
 python -m src.gov_usage.fetch_socrata              # pulls city portals enabled in sources.yaml, 2020-present
+python -m src.gov_usage.fetch_unemployment         # DOL ETA 9050, all states, 2020-present
+python -m src.gov_usage.fetch_bls_controls         # BLS state unemployment rate (the control variable)
 
 # 3. Merge everything into the state x year panel
 python -m src.combine
@@ -114,9 +121,31 @@ and normalize them with that function — see the docstring in
   detail, so treat this part of the combined table as an NYC case study,
   not a 50-state comparison, until a new source turns up.
 
+- **Unemployment-insurance first-payment processing time** — DOL's ETA
+  9050 report ("Time Lapse of All First Payments Except Workshare") is
+  published directly as a stable CSV
+  (`oui.doleta.gov/unemploy/csv/ar9050.csv`), updated daily, all states +
+  DC/PR/VI, back to 1997 — no API key, no pagination, genuinely easy
+  compared to the other two sources. `fetch_unemployment.py` aggregates
+  DOL's monthly, bucketed (by days-to-payment) counts into
+  `ui_pct_within_21_days` and an approximate
+  `ui_avg_days_to_first_payment_approx` per (state, year); see the
+  docstring for the column layout, taken from DOL's own data-map PDF.
+  **This needs a control**: processing time balloons whenever claim volume
+  spikes (2020's numbers are dramatically different from surrounding
+  years for exactly this reason) for reasons that have nothing to do with
+  AI adoption or state competence. `fetch_bls_controls.py` pulls each
+  state's annual average unemployment rate from BLS's public LAUS API as
+  that control variable (`unemployment_rate_avg`) — treat any comparison
+  of the UI processing-time columns across states/years as needing to
+  control for it, not read at face value. The BLS API's anonymous quota
+  is shared per source IP and can run out for reasons unrelated to this
+  project (25 queries/day); pass `--api-key` with a free BLS registration
+  if you hit that.
+
 `data/processed/combined_state_data.csv` includes a `data_coverage_notes`
-column per (state, year) row (e.g. `trends,court-stats,no-parking`) so
-gaps are explicit rather than silently blank.
+column per (state, year) row (e.g. `trends,court-stats,no-parking,unemployment,controls`)
+so gaps are explicit rather than silently blank.
 
 ## Tests
 

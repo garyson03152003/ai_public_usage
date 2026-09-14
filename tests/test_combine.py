@@ -14,6 +14,8 @@ def test_combine_builds_state_year_panel(tmp_path):
         trends_dir=FIXTURES / "trends",
         court_stats_dir=FIXTURES / "court_stats",
         parking_dir=FIXTURES / "parking_tickets",
+        unemployment_dir=FIXTURES / "unemployment",
+        controls_dir=FIXTURES / "controls",
         output_path=output_path,
         start_year=2023,
         end_year=2024,
@@ -30,33 +32,40 @@ def test_combine_builds_state_year_panel(tmp_path):
     # ai_interest_index is the mean of Claude AI (78) and ChatGPT (90) for 2024.
     assert ca_2024["ai_interest_index"] == 84.0
     assert ca_2024["small_claims_filings"] == 150000
-    assert ca_2024["data_coverage_notes"] == "trends,court-stats,no-parking"
+    assert ca_2024["ui_pct_within_21_days"] == 72.5
+    assert ca_2024["unemployment_rate_avg"] == 5.2
+    assert ca_2024["data_coverage_notes"] == "trends,court-stats,no-parking,unemployment,controls"
 
-    # 2023 fixtures only include Claude AI (no ChatGPT) and no CA court-stats row.
+    # 2023 fixtures only include Claude AI (no ChatGPT) and no CA court-stats/UI row.
     ca_2023 = by_state_year.loc[("California", 2023)]
     assert ca_2023["ai_interest_index"] == 30.0
-    assert ca_2023["data_coverage_notes"] == "trends,no-court-stats,no-parking"
+    assert pd.isna(ca_2023["ui_pct_within_21_days"])
+    assert ca_2023["data_coverage_notes"] == "trends,no-court-stats,no-parking,no-unemployment,no-controls"
 
     ny_2024 = by_state_year.loc[("New York", 2024)]
     assert ny_2024["small_claims_avg_processing_days"] == 74
     # 2 "HEARING HELD-GUILTY" + 1 "APPEAL AFFIRMED" from the fixture.
     assert ny_2024["parking_hearing_records"] == 3
     assert ny_2024["parking_appeal_records"] == 1
-    assert ny_2024["data_coverage_notes"] == "trends,court-stats,parking"
+    assert ny_2024["ui_first_payments_total"] == 50000
+    assert ny_2024["unemployment_rate_avg"] == 4.4
+    assert ny_2024["data_coverage_notes"] == "trends,court-stats,parking,unemployment,controls"
 
-    # Parking fixture only covers 2024, so 2023 has no parking data.
+    # Parking fixture only covers 2024, but UI/controls fixtures cover both years.
     ny_2023 = by_state_year.loc[("New York", 2023)]
     assert ny_2023["small_claims_avg_processing_days"] == 80
     assert pd.isna(ny_2023["parking_hearing_records"])
-    assert ny_2023["data_coverage_notes"] == "trends,court-stats,no-parking"
+    assert ny_2023["ui_pct_within_21_days"] == 60.0
+    assert ny_2023["unemployment_rate_avg"] == 4.1
+    assert ny_2023["data_coverage_notes"] == "trends,court-stats,no-parking,unemployment,controls"
 
     # A state with no gov-usage fixture data at all still appears, with NaNs.
     wyoming_2024 = by_state_year.loc[("Wyoming", 2024)]
     assert wyoming_2024["ai_interest_index"] == 10.0
-    assert wyoming_2024["data_coverage_notes"] == "trends,no-court-stats,no-parking"
+    assert wyoming_2024["data_coverage_notes"] == "trends,no-court-stats,no-parking,no-unemployment,no-controls"
 
     montana_2024 = by_state_year.loc[("Montana", 2024)]
-    assert montana_2024["data_coverage_notes"] == "no-trends,no-court-stats,no-parking"
+    assert montana_2024["data_coverage_notes"] == "no-trends,no-court-stats,no-parking,no-unemployment,no-controls"
 
 
 def test_state_normalization_handles_abbreviations_and_cities():

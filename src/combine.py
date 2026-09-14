@@ -10,9 +10,19 @@ Coverage is inherently uneven: Trends data covers all 50 states + DC for
 whichever term/year combinations were successfully fetched; court-stats
 and parking-ticket data only cover whatever years/states/cities you
 fetched (parking data is city-level, e.g. NYC only, not a 50-state
-comparison). Missing values are left as NaN rather than silently dropped
-or interpolated, and a `data_coverage_notes` column flags which pieces are
+comparison); unemployment-insurance processing time (DOL ETA 9050) and its
+unemployment-rate control (BLS LAUS) cover all states once fetched.
+Missing values are left as NaN rather than silently dropped or
+interpolated, and a `data_coverage_notes` column flags which pieces are
 present for each (state, year) row.
+
+The unemployment_rate_avg column is a *control*, not a usage metric: UI
+first-payment processing time naturally gets worse when claim volume
+spikes (a state mid-recession looks "slower" for reasons unrelated to AI
+adoption or administrative competence), so any comparison of
+ui_pct_within_21_days / ui_avg_days_to_first_payment_approx across states
+or over time should control for unemployment_rate_avg rather than reading
+the raw numbers at face value.
 
 Usage:
     python -m src.combine
@@ -32,6 +42,8 @@ ROOT = Path(__file__).resolve().parent.parent
 TRENDS_DIR = ROOT / "data" / "raw" / "trends"
 COURT_STATS_DIR = ROOT / "data" / "raw" / "court_stats"
 PARKING_DIR = ROOT / "data" / "raw" / "parking_tickets"
+UNEMPLOYMENT_DIR = ROOT / "data" / "raw" / "unemployment"
+CONTROLS_DIR = ROOT / "data" / "raw" / "controls"
 OUTPUT_PATH = ROOT / "data" / "processed" / "combined_state_data.csv"
 
 ALL_STATES = pd.DataFrame({"state": list(US_STATE_TO_ABBR.keys())})
@@ -126,11 +138,39 @@ def load_parking_tickets(parking_dir: Path = PARKING_DIR) -> pd.DataFrame:
     return panel
 
 
+def load_unemployment(unemployment_dir: Path = UNEMPLOYMENT_DIR) -> pd.DataFrame:
+    """Read the state-year summary produced by fetch_unemployment.py
+    (DOL ETA 9050: UI first-payment processing time)."""
+    path = unemployment_dir / "eta9050_state_year.csv"
+    if not path.exists():
+        return pd.DataFrame(
+            columns=["state", "year", "ui_first_payments_total", "ui_pct_within_21_days", "ui_avg_days_to_first_payment_approx"]
+        )
+    df = pd.read_csv(path)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    return df
+
+
+def load_controls(controls_dir: Path = CONTROLS_DIR) -> pd.DataFrame:
+    """Read the state-year control variables produced by
+    fetch_bls_controls.py (currently: average unemployment rate). Kept
+    separate from the UI processing-time numbers above so it's clear this
+    is a covariate to control for, not part of the thing being measured."""
+    path = controls_dir / "bls_unemployment_rate.csv"
+    if not path.exists():
+        return pd.DataFrame(columns=["state", "year", "unemployment_rate_avg"])
+    df = pd.read_csv(path)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    return df
+
+
 def coverage_note(row: pd.Series) -> str:
     parts = [
         "trends" if pd.notna(row.get("ai_interest_index")) else "no-trends",
         "court-stats" if pd.notna(row.get("small_claims_filings")) else "no-court-stats",
         "parking" if pd.notna(row.get("parking_hearing_records")) else "no-parking",
+        "unemployment" if pd.notna(row.get("ui_first_payments_total")) else "no-unemployment",
+        "controls" if pd.notna(row.get("unemployment_rate_avg")) else "no-controls",
     ]
     return ",".join(parts)
 
@@ -139,6 +179,8 @@ def combine(
     trends_dir: Path = TRENDS_DIR,
     court_stats_dir: Path = COURT_STATS_DIR,
     parking_dir: Path = PARKING_DIR,
+    unemployment_dir: Path = UNEMPLOYMENT_DIR,
+    controls_dir: Path = CONTROLS_DIR,
     output_path: Path = OUTPUT_PATH,
     start_year: int = DEFAULT_START_YEAR,
     end_year: int | None = None,
@@ -148,6 +190,8 @@ def combine(
     trends = load_trends(trends_dir)
     court_stats = load_court_stats(court_stats_dir)
     parking = load_parking_tickets(parking_dir)
+    unemployment = load_unemployment(unemployment_dir)
+    controls = load_controls(controls_dir)
 
     years = pd.DataFrame({"year": range(start_year, end_year + 1)})
     backbone = ALL_STATES.merge(years, how="cross")
@@ -156,6 +200,8 @@ def combine(
         backbone.merge(trends, on=["state", "year"], how="left")
         .merge(court_stats, on=["state", "year"], how="left")
         .merge(parking, on=["state", "year"], how="left")
+        .merge(unemployment, on=["state", "year"], how="left")
+        .merge(controls, on=["state", "year"], how="left")
     )
     combined.insert(1, "state_abbr", combined["state"].map(US_STATE_TO_ABBR))
     combined["data_coverage_notes"] = combined.apply(coverage_note, axis=1)
