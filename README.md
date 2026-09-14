@@ -132,8 +132,11 @@ and normalize them with that function — see the docstring in
   is huge (hundreds of millions of rows) and `issue_date` is stored as
   plain text, so `fetch_socrata.py` aggregates counts per
   year/outcome server-side rather than downloading raw rows; expect each
-  year to take a couple of minutes unauthenticated (pass a free Socrata
-  app token via `--app-token` to speed this up).
+  year (or, with `--granularity month`, each month -- Socrata still scans
+  the whole table for a plain-text LIKE filter regardless of how narrow
+  the date range is, so this isn't ~12x faster than the yearly version)
+  to take a couple of minutes unauthenticated (pass a free Socrata app
+  token via `--app-token` to speed this up).
 
   The largest city in every other state was checked directly (live API
   queries, not just search results) for an equivalent dataset — see the
@@ -177,13 +180,16 @@ so gaps are explicit rather than silently blank.
 `src/analysis/` asks a sharper question than "did AI interest and public-
 resource usage both rise over time": does a specific model/service launch
 coincide with a shift in a usage metric, right around that date? This
-needs monthly resolution, which rules out the parking and court-stats
-data (annual only) -- only AI search interest and UI first-payment
-processing time are available monthly, so that's what this analysis uses.
+needs monthly resolution, which still rules out court-stats data (annual
+only) -- AI search interest, UI first-payment processing time, and (as of
+`fetch_socrata.py --granularity month`) NYC parking-ticket hearing/appeal
+volume are all available monthly, so those are the outcomes this analysis
+can use (parking is NYC-only, same as the annual version).
 
 ```bash
-# Needs the monthly Trends fetch (see above) and fetch_unemployment.py
-# (which now writes a monthly file too, not just the annual one) already run.
+# Needs the monthly Trends fetch (see above), fetch_unemployment.py (which
+# now writes a monthly file too, not just the annual one), and optionally
+# fetch_socrata.py --granularity month for a parking-ticket outcome, already run.
 python -m src.analysis.build_panel   # -> data/processed/analysis_panel_state_month.csv
 
 # Event-study: outcome in each month relative to a launch date, vs. the
@@ -194,6 +200,13 @@ python -m src.analysis.event_study --event deepseek_r1 --outcome ui_pct_within_2
 # Fuzzy RD: local-linear jump in ai_interest_index (first stage) and in a
 # usage outcome (reduced form) right at the launch date, ratio = LATE.
 python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_21_days
+
+# The parking outcome only has data for New York, so after dropping
+# other states' NaN rows the "state fixed effects" term in
+# event_study.py/stacked_event_study.py has just one category and
+# contributes nothing beyond the intercept -- this still runs, but reads
+# as New York's own average change, not a cross-state comparison.
+python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appeal_records
 
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
