@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import random
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -31,6 +33,7 @@ from src.trends.fetch_trends import DEFAULT_START_YEAR
 
 RAW_DIR = Path(__file__).resolve().parents[2] / "data" / "raw" / "parking_tickets"
 SOURCES_PATH = Path(__file__).resolve().parent / "sources.yaml"
+REQUEST_TIMEOUT = 300
 
 
 def load_sources() -> list[dict]:
@@ -38,9 +41,8 @@ def load_sources() -> list[dict]:
     return [s for s in config["sources"] if s.get("enabled") and s.get("dataset_id")]
 
 
-def fetch_source_year(source: dict, year: int, app_token: str | None) -> Path:
-    client = Socrata(source["domain"], app_token, timeout=180)
-
+def _query_year(source: dict, year: int, app_token: str | None) -> pd.DataFrame:
+    client = Socrata(source["domain"], app_token, timeout=REQUEST_TIMEOUT)
     status_clause = " OR ".join(f"{source['status_field']} like '%{kw}%'" for kw in source["status_filter"])
     where = f"{source['date_field']} like '%/{year}' AND ({status_clause})"
 
@@ -59,6 +61,27 @@ def fetch_source_year(source: dict, year: int, app_token: str | None) -> Path:
     df["year"] = year
     df["state"] = source["state"]
     df["source_name"] = source["name"]
+    return df
+
+
+def fetch_source_year(source: dict, year: int, app_token: str | None, max_retries: int = 3) -> Path | None:
+    """Aggregate one (source, year) via SoQL, retrying with backoff on the
+    timeouts these large, unauthenticated group-by queries commonly hit.
+    Returns None (and skips this year) if every attempt fails, rather than
+    crashing the whole multi-year run."""
+    last_exc: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            df = _query_year(source, year, app_token)
+            break
+        except Exception as exc:  # sodapy/requests raise a variety of transient errors
+            last_exc = exc
+            wait = min(120, 15 * attempt) + random.uniform(0, 5)
+            print(f"[{source['name']} / {year}] attempt {attempt}/{max_retries} failed ({exc}); retrying in {wait:.0f}s")
+            time.sleep(wait)
+    else:
+        print(f"SKIP: '{source['name']}' / {year} failed after {max_retries} attempts ({last_exc})")
+        return None
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     out_path = RAW_DIR / f"{source['dataset_id']}_{year}.csv"
