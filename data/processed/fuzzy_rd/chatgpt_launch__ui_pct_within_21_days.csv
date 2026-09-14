@@ -1,0 +1,2 @@
+event,event_label,event_date,outcome,running_metric,bandwidth_months,first_stage_jump,first_stage_se,first_stage_n,reduced_form_jump,reduced_form_se,reduced_form_n,fuzzy_rd_late,fuzzy_rd_late_se_approx
+chatgpt_launch,ChatGPT public launch,2022-11-30,ui_pct_within_21_days,ai_interest_index,6,-0.18816914544204455,0.4574173314184374,663,2.307361171183863,0.5438748557137564,663,-12.262165328770768,29.947704252283284
