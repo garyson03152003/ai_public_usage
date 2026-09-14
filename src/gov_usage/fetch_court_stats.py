@@ -18,16 +18,35 @@ Two paths are implemented:
    adapt this function's URL or download the file manually and use path 2.
 
 2. `normalize_manual_export()` -- the reliable path. The National Center
-   for State Courts' Court Statistics Project (courtstatistics.org,
-   "CSP STAT") publishes richer, more current small-claims/civil caseload
-   and time-to-disposition figures, but only through an interactive
-   Tableau-style dashboard with manual CSV/Excel export -- there was never
-   a stable public REST endpoint for this one. Export the state(s) and
-   case type(s) you need from
-   https://www.courtstatistics.org/court-statistics/interactive-caseload-data-displays/csp-stat
-   and point this function at the exported file; it standardizes whatever
-   columns you give it via a small mapping you fill in once you see your
-   export's actual headers.
+   for State Courts' Court Statistics Project now lives on a Tableau
+   Server (tableau.ncsc.org, linked from
+   https://www.ncsc.org/explore-court-caseload-data), with richer, more
+   current small-claims/civil caseload figures than DOJ/BJS's stalled
+   series. Export the state(s)/case type(s) you need by hand from a
+   dashboard there and point this function at the exported file; it
+   standardizes whatever columns you give it via a small mapping you fill
+   in once you see your export's actual headers.
+
+   What was actually investigated here, live, before concluding manual
+   export is necessary (not assumed): Tableau Server supports a simple
+   `<view-url>.csv` GET that exports a view's data without needing a full
+   interactive session -- confirmed working, e.g.
+   `tableau.ncsc.org/t/Research/views/TrialDashboards/Overview.csv`
+   returns real national civil/criminal caseload-by-year figures, and
+   `.../CivilTrends2018-2022/TrendbyState2.csv?CaseType=Small%20Claims`
+   confirms "Small Claims" is a real case-type category in NCSC's data
+   model. But the specific dashboards linked from NCSC's public pages
+   render as either a national KPI number (not state-level) or an
+   interactive map/crosstab whose underlying by-state data isn't exposed
+   through that simple GET -- getting it needs Tableau's in-app "Download
+   Crosstab" feature, which runs over a live VizQL session (WebSocket).
+   This sandbox's egress proxy doesn't support WebSocket upgrades
+   (confirmed via repeated `ws_closed_mid_exchange` failures against
+   tableau.ncsc.org, not assumed), so that path isn't reachable from here
+   even with a real browser (tried via Playwright). A differently
+   configured environment with full WebSocket support could likely
+   automate this properly; from here, manual export remains the reliable
+   option.
 
 Path 1 needs network access to catalog.data.gov. Path 2 needs no network
 access here since it only reformats a file you already downloaded.

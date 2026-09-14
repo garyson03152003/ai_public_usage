@@ -120,9 +120,15 @@ and normalize them with that function — see the docstring in
   monthly grid would just repeat each year's value 12 times without
   adding information.
 - **State court caseloads** — no working automated nationwide source as
-  of 2026 (see above); use the NCSC CSP STAT manual-export path. Once
-  normalized, `combine.py` keeps every (state, year) row rather than
-  collapsing to a single snapshot.
+  of 2026 (see above); use the NCSC manual-export path. Confirmed live
+  (not assumed) that NCSC's Tableau-hosted dashboards support a simple
+  `<view>.csv` export for KPI-style views, including confirming "Small
+  Claims" is a real case-type category in their data — but the specific
+  by-state dashboards need Tableau's interactive "Download Crosstab"
+  feature, which runs over a WebSocket session this sandbox's proxy
+  doesn't support; see `fetch_court_stats.py`'s docstring for the full
+  trail. Once normalized, `combine.py` keeps every (state, year) row
+  rather than collapsing to a single snapshot.
 - **Parking ticket appeals** — there is no national dataset. This repo
   ships one verified source: NYC's "Open Parking and Camera Violations"
   (Socrata dataset `nc67-uf89` on `data.cityofnewyork.us`), which has a
