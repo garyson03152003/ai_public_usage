@@ -12,3 +12,11 @@ __pycache__/
 /data/raw/controls/**
 !/data/raw/court_stats/.gitkeep
 !/data/raw/controls/.gitkeep
+
+# TEMPORARY: a long-running monthly Trends fetch is still in progress and
+# writes new files continuously for a couple of hours. Ignoring the rest
+# of it here to avoid a flood of tiny incremental commits; the already-
+# committed 2020-01 files are unaffected (gitignore doesn't touch tracked
+# files). Remove this line and commit the finished directory once
+# `python -m src.trends.fetch_trends --granularity month` completes.
+/data/raw/trends_monthly/**
