@@ -35,7 +35,8 @@ src/
   us_states.py              # state name/abbreviation/city normalization used to join everything
   trends/
     terms.py                # the list of search terms tracked
-    fetch_trends.py          # pytrends: per-term, per-year interest-by-region -> data/raw/trends/<year>/<term>.csv
+    fetch_trends.py          # pytrends: per-term, per-year (or --granularity month) interest-by-region
+  combine_trends_monthly.py   # merges data/raw/trends_monthly/* -> data/processed/trends_state_month.csv
   gov_usage/
     fetch_court_stats.py     # data.gov CKAN attempt + manual-export normalizer for court caseload data
     fetch_socrata.py         # Socrata (SODA API) fetcher, aggregated per year, for city portals
@@ -63,6 +64,14 @@ pip install -r requirements.txt
 python -m src.trends.fetch_trends
 # or a custom term list / year range:
 python -m src.trends.fetch_trends --terms "Claude AI" "ChatGPT" --start-year 2023 --end-year 2026
+
+# 1b. Optional: the same thing at monthly granularity instead of yearly,
+#     for an actual trend line rather than one point per year. This is
+#     ~12x the requests (all 20 terms, 2020-present, is ~1600+ requests --
+#     budget a couple of hours) and writes to a separate directory so it
+#     doesn't clobber the yearly fetch:
+python -m src.trends.fetch_trends --granularity month
+python -m src.combine_trends_monthly   # -> data/processed/trends_state_month.csv
 
 # 2. Government usage data
 python -m src.gov_usage.fetch_court_stats          # best-effort data.gov download attempt, see caveat below
@@ -94,6 +103,16 @@ and normalize them with that function — see the docstring in
   This is *relative search interest*, not usage; a spike can reflect news
   coverage as easily as adoption. Low-population states can be noisy or
   suppressed entirely by Google Trends for low search volume.
+
+  For an actual trend line rather than one point per year, `fetch_trends.py
+  --granularity month` fetches the same thing per calendar month instead
+  (data/raw/trends_monthly/<year>-<month>/<term>.csv), and
+  `combine_trends_monthly.py` builds a state x year x month panel from it
+  at `data/processed/trends_state_month.csv`. This is kept as a separate
+  file rather than merged into combined_state_data.csv: the government-
+  usage data below is only available annually, so joining it onto a
+  monthly grid would just repeat each year's value 12 times without
+  adding information.
 - **State court caseloads** — no working automated nationwide source as
   of 2026 (see above); use the NCSC CSP STAT manual-export path. Once
   normalized, `combine.py` keeps every (state, year) row rather than
