@@ -64,9 +64,26 @@ level effect per event-time bin, it just reweights which state-months
 that average leans on, whereas fuzzy_rd.py estimates the ratio of two
 jumps (impact per unit of search-interest increase).
 
+Optional per-EVENT weighting (--event-impact-col, via
+compute_event_impact_weights()): different from --weight-col above,
+which reweights individual state-months. This instead reweights whole
+events: every row belonging to a given launch gets that launch's own
+impact score (a plain pre/post mean difference in the given column, e.g.
+ai_interest_index -- NOT fuzzy_rd.py's local-linear RD jump, which
+measures discontinuity sharpness at the cutoff and badly underrates a
+launch like ChatGPT whose interest built up gradually rather than
+overnight; see compute_event_impact_weights()'s docstring), so a launch
+that visibly moved search interest a lot (ChatGPT) counts more toward the
+pooled average effect than one that barely moved it (e.g. GPT-4o,
+already-elevated interest that barely rose further), rather than all 12
+launches counting as equal contributions regardless of how big a splash
+they actually made. Combine both flags to weight by both event-level
+impact and within-event state-month attention at once.
+
 Usage:
     python -m src.analysis.stacked_event_study --outcome ai_interest_index
     python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --controls unemployment_rate --window 6
+    python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --event-impact-col ai_interest_index
     python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --weight-col ai_interest_index
 """
 
@@ -133,6 +150,47 @@ def build_stacked_panel(
     return pd.concat(frames, ignore_index=True)
 
 
+def compute_event_impact_weights(
+    panel: pd.DataFrame,
+    events: list[Event],
+    impact_col: str = "ai_interest_index",
+    bandwidth: int = 6,
+) -> dict[str, float]:
+    """One scalar per event: how much impact_col shifted around that
+    launch, as a plain pre-window-mean vs. post-window-mean difference
+    (abs value). Meant to be passed as `event_weights` to
+    run_stacked_event_study() so a blockbuster launch (a big, sustained
+    rise in search interest, e.g. ChatGPT) counts more toward the pooled
+    average effect than a smaller one (e.g. GPT-4o, whose search interest
+    was already elevated and barely moved further), instead of every
+    launch counting as one equal contribution regardless of how much
+    attention it actually got.
+
+    Deliberately NOT fuzzy_rd.py's local-linear RD jump, despite the
+    superficial similarity -- tried that first and it gives the wrong
+    answer here: RD estimates the sharpness of the discontinuity exactly
+    at the cutoff month, which comes out tiny for a launch whose interest
+    built up gradually/virally over the following months rather than
+    jumping overnight (confirmed live: ChatGPT's own local-linear jump is
+    ~0.2, the smallest of all 12 events, despite its plain pre/post mean
+    difference of +5.6 being mid-to-high among them) -- not what "how big
+    a splash did this launch make" means colloquially. A simple pre/post
+    mean difference doesn't have that blind spot.
+
+    An event whose window has no pre- or post-period data at all gets
+    NaN, which run_stacked_event_study() will reject rather than silently
+    drop -- pass a subset of `events` that all have coverage instead.
+    """
+    weights: dict[str, float] = {}
+    for event in events:
+        df = panel.copy()
+        df["event_time"] = [months_since(y, m, event) for y, m in zip(df["year"], df["month"])]
+        pre = df[df["event_time"].between(-bandwidth, -1)][impact_col].mean()
+        post = df[df["event_time"].between(0, bandwidth)][impact_col].mean()
+        weights[event.key] = abs(post - pre)
+    return weights
+
+
 def run_stacked_event_study(
     panel: pd.DataFrame,
     events: list[Event],
@@ -142,21 +200,39 @@ def run_stacked_event_study(
     trim_to_neighbors: bool = True,
     reference_period: int = -1,
     weight_col: str | None = None,
+    event_weights: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     stacked = build_stacked_panel(panel, events, max_window, trim_to_neighbors)
     stacked = stacked.dropna(subset=[outcome_col, "state"])
     if control_cols:
         stacked = stacked.dropna(subset=control_cols)
 
-    if weight_col:
-        stacked = stacked.dropna(subset=[weight_col])
-        zero_or_negative = (stacked[weight_col] <= 0).sum()
+    effective_weight_col = weight_col
+    if event_weights:
+        # Per-event weight (same value for every row belonging to that
+        # event), rather than weight_col's per-row weight -- see
+        # compute_event_impact_weights()'s docstring. Combine with
+        # weight_col by multiplying, if both are given.
+        missing = sorted(e.key for e in events if e.key not in event_weights)
+        if missing:
+            raise ValueError(f"event_weights is missing entries for: {missing}")
+        stacked["_event_impact_weight"] = stacked["event_key"].map(event_weights)
+        if weight_col:
+            stacked["_combined_weight"] = stacked[weight_col] * stacked["_event_impact_weight"]
+            effective_weight_col = "_combined_weight"
+        else:
+            effective_weight_col = "_event_impact_weight"
+
+    if effective_weight_col:
+        stacked = stacked.dropna(subset=[effective_weight_col])
+        zero_or_negative = (stacked[effective_weight_col] <= 0).sum()
         if zero_or_negative:
             print(
-                f"Note: dropping {zero_or_negative} row(s) with {weight_col} <= 0 -- WLS weights must be "
-                "positive, and a month with literally zero search interest carries no information under this weighting anyway."
+                f"Note: dropping {zero_or_negative} row(s) with a non-positive effective weight -- WLS weights must be "
+                "positive, and (for a per-row weight_col) a month with literally zero search interest carries no "
+                "information under this weighting anyway."
             )
-            stacked = stacked[stacked[weight_col] > 0]
+            stacked = stacked[stacked[effective_weight_col] > 0]
 
     if stacked["event_time"].nunique() < 2:
         raise ValueError(f"Not enough distinct event_time periods across the stacked events for {outcome_col} -- is the panel populated?")
@@ -170,12 +246,13 @@ def run_stacked_event_study(
     if control_cols:
         formula += " + " + " + ".join(control_cols)
 
-    if weight_col:
-        # WLS weighted by e.g. ai_interest_index: months/states with more
-        # AI search attention count more toward the estimated impact,
-        # instead of every state-month counting equally regardless of
-        # how much anyone was actually paying attention to AI at the time.
-        ols = smf.wls(formula, data=stacked, weights=stacked[weight_col])
+    if effective_weight_col:
+        # WLS weighted by e.g. ai_interest_index (weight_col, per-row) or
+        # each event's own attention-jump size (event_weights, per-event):
+        # months/states/events with more of whatever is being weighted by
+        # count more toward the estimated impact, instead of every
+        # observation counting equally regardless of actual attention.
+        ols = smf.wls(formula, data=stacked, weights=stacked[effective_weight_col])
     else:
         ols = smf.ols(formula, data=stacked)
     n_clusters = stacked["state"].nunique()
@@ -259,11 +336,27 @@ def main() -> None:
         help="Run WLS instead of OLS, weighted by this column (e.g. ai_interest_index) -- state-months with more "
         "of whatever this column measures count more toward the estimated impact.",
     )
+    parser.add_argument(
+        "--event-impact-col",
+        default=None,
+        help="Weight each EVENT (not each state-month) by the size of its own local-linear jump in this column "
+        "(e.g. ai_interest_index), via compute_event_impact_weights() -- a launch with a bigger search-interest "
+        "jump (e.g. ChatGPT) counts more toward the pooled average than a smaller one (e.g. Gemini 1.0), instead "
+        "of every launch counting as one equal contribution. Combines with --weight-col if both are given.",
+    )
     parser.add_argument("--panel", type=Path, default=PANEL_PATH)
     args = parser.parse_args()
 
     panel = pd.read_csv(args.panel)
     events = [EVENTS_BY_KEY[k] for k in args.events] if args.events else list(EVENTS)
+
+    event_weights = None
+    if args.event_impact_col:
+        event_weights = compute_event_impact_weights(panel, events, impact_col=args.event_impact_col, bandwidth=args.window)
+        print("Per-event impact weights:")
+        for event in events:
+            print(f"  {event.key:20s} {event_weights[event.key]:.2f}")
+
     result = run_stacked_event_study(
         panel,
         events,
@@ -272,10 +365,16 @@ def main() -> None:
         control_cols=args.controls,
         trim_to_neighbors=not args.no_trim,
         weight_col=args.weight_col,
+        event_weights=event_weights,
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    suffix = f"__weighted_{args.weight_col}" if args.weight_col else ""
+    suffix_parts = []
+    if args.weight_col:
+        suffix_parts.append(f"weighted_{args.weight_col}")
+    if args.event_impact_col:
+        suffix_parts.append(f"eventweighted_{args.event_impact_col}")
+    suffix = ("__" + "_".join(suffix_parts)) if suffix_parts else ""
     csv_path = OUTPUT_DIR / f"stacked__{args.outcome}{suffix}.csv"
     result.to_csv(csv_path, index=False)
     print(f"n_events={result.attrs.get('n_events')} n_obs={result.attrs.get('n_obs')} r_squared={result.attrs.get('r_squared'):.4f}")

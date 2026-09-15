@@ -7,7 +7,7 @@ import pytest
 from src.analysis.events import EVENTS, EVENTS_BY_KEY, Event, months_since
 from src.analysis.event_study import run_event_study
 from src.analysis.fuzzy_rd import fuzzy_rd
-from src.analysis.stacked_event_study import event_time_bounds, run_stacked_event_study
+from src.analysis.stacked_event_study import compute_event_impact_weights, event_time_bounds, run_stacked_event_study
 
 EVENT = EVENTS_BY_KEY["chatgpt_launch"]  # 2022-11-30
 
@@ -223,3 +223,80 @@ def test_stacked_event_study_weight_col_drops_non_positive_weights():
     result = run_stacked_event_study(panel, events, "y", max_window=6, weight_col="weight")
     post = result[result["event_time"].between(0, 6)]["coef"].mean()
     assert post == pytest.approx(10.0, abs=1.5)
+
+
+def _event_impact_synthetic_panel(events: list[Event], event_impact: dict[str, float], seed: int = 0) -> pd.DataFrame:
+    """4 states with a seasonal confound (the known-working structure
+    from _stacked_synthetic_panel), but this time each EVENT (not each
+    state) has its own jump size, in both 'trend' (the impact/dose
+    column an event's own weight would be computed from) and 'y' (the
+    outcome) -- every state sees the same jump for a given event."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            seasonal = 3.0 * np.sin(month / 12 * 2 * np.pi)
+            trend = 0.0
+            jump = 0.0
+            for event in events:
+                et = months_since(year, month, event)
+                if 0 <= et <= 6:
+                    trend = event_impact[event.key]
+                    jump = event_impact[event.key]
+            noise = rng.normal(0, 0.3)
+            rows.append(
+                {
+                    "state": state,
+                    "year": year,
+                    "month": month,
+                    "trend": trend,
+                    "y": state_effect[state] + seasonal + jump + noise,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_compute_event_impact_weights_recovers_known_jump_sizes():
+    events = _well_separated_events()
+    impact = {"e1": 2.0, "e2": 5.0, "e3": 20.0}
+    panel = _event_impact_synthetic_panel(events, impact)
+
+    weights = compute_event_impact_weights(panel, events, impact_col="trend", bandwidth=6)
+
+    for key, expected in impact.items():
+        assert weights[key] == pytest.approx(expected, abs=0.5)
+
+
+def test_event_weights_shifts_pooled_estimate_toward_high_impact_events():
+    """e3's own outcome jump (20) is much bigger than e1's (2) or e2's
+    (5); an event-impact-weighted pooled estimate (weighted toward e3,
+    the biggest search-interest mover) should sit well above the
+    unweighted mean(2, 5, 20) = 9.0."""
+    events = _well_separated_events()
+    impact = {"e1": 2.0, "e2": 5.0, "e3": 20.0}
+    panel = _event_impact_synthetic_panel(events, impact)
+    weights = compute_event_impact_weights(panel, events, impact_col="trend", bandwidth=6)
+
+    unweighted = run_stacked_event_study(panel, events, "y", max_window=6)
+    weighted = run_stacked_event_study(panel, events, "y", max_window=6, event_weights=weights)
+
+    unweighted_post = unweighted[unweighted["event_time"].between(0, 6)]["coef"].mean()
+    weighted_post = weighted[weighted["event_time"].between(0, 6)]["coef"].mean()
+
+    assert unweighted_post == pytest.approx(9.0, abs=1.5)
+    assert weighted_post > unweighted_post + 1.0
+
+
+def test_run_stacked_event_study_rejects_incomplete_event_weights():
+    events = _well_separated_events()
+    panel = _event_impact_synthetic_panel(events, {"e1": 2.0, "e2": 5.0, "e3": 20.0})
+
+    with pytest.raises(ValueError, match="event_weights is missing"):
+        run_stacked_event_study(panel, events, "y", max_window=6, event_weights={"e1": 2.0, "e2": 5.0})

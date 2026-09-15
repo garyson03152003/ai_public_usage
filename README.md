@@ -266,6 +266,15 @@ python -m src.analysis.stacked_event_study --outcome parking_appeal_records --wi
 # equally regardless of whether anyone was paying attention to AI at all.
 python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --weight-col ai_interest_index
 
+# --event-impact-col: a different kind of weighting -- instead of
+# reweighting individual state-months, reweight whole EVENTS by how much
+# of a splash each launch made (a plain pre/post mean difference in
+# ai_interest_index around that launch), so a launch that clearly moved
+# search interest a lot counts more toward the pooled average than one
+# that barely moved it, instead of all 12 launches counting equally
+# regardless of how big a deal they actually were.
+python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --event-impact-col ai_interest_index
+
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
 # reliable version.
@@ -332,14 +341,35 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   weight-outcome relationship, but the project's own known rank-deficiency
   quirk (below) makes exact recovery on small synthetic panels noisier
   under WLS than under plain OLS.
+- `stacked_event_study.py --event-impact-col <column>` weights whole
+  EVENTS instead of individual state-months: every row from a given
+  launch gets that launch's own impact score, so a launch that clearly
+  moved search interest (ChatGPT) counts more toward the pooled average
+  than one that barely moved it (e.g. GPT-4o, whose interest was already
+  elevated and barely rose further), rather than treating all 12 launches
+  as equal contributions regardless of how big a deal they actually were.
+  `compute_event_impact_weights()` computes this as a plain pre/post mean
+  difference in the given column around each launch -- **not**
+  `fuzzy_rd.py`'s local-linear RD jump, despite the superficial
+  similarity. That was tried first and gives the wrong answer here:
+  confirmed live, ChatGPT's own local-linear jump comes out as ~0.2, the
+  *smallest* of all 12 events, because RD measures the sharpness of the
+  discontinuity exactly at the cutoff month, and ChatGPT's rise was
+  gradual/viral over the following months rather than an overnight jump
+  -- its plain pre/post mean difference (+5.6) tells the truer story and
+  lands mid-to-high among the 12 launches, as expected. This is a useful
+  general lesson about the two techniques in this codebase: RD-style
+  jump estimation answers "how sharp was the break right at the cutoff,"
+  which is not the same question as "how big a splash did this event
+  make overall," and the wrong one will quietly give nonsensical weights.
 - All three are validated in `tests/test_analysis.py` against synthetic
   panels with a known, engineered jump, not just run against real data
   and eyeballed — including a check that pooling multiple events (landing
   in different calendar months) does let seasonality be identified where
   a single event provably can't, a check on the window-trimming math
-  itself using this project's actual event gaps, and a check that
-  `--weight-col` shifts the estimate toward whichever states/months carry
-  more weight.
+  itself using this project's actual event gaps, and checks that both
+  `--weight-col` and `--event-impact-col` shift the estimate toward
+  whichever states/months/events carry more weight.
 - The actual estimates need the monthly Trends fetch to have reached each
   event's date — for events from late 2022 onward this means waiting for
   most of the ~1600-request monthly fetch to complete.
@@ -388,10 +418,17 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   more actual AI search attention count more) doesn't change the
   conclusion either: every post-launch coefficient is still insignificant
   (p>0.16), and the shape is the same smooth, symmetric dip on both sides
-  of the launch date. The individual-event regressions are degenerate
-  (see above) rather than merely noisy, and the individual fuzzy-RD
-  estimates have standard errors several times larger than their point
-  estimates — uninformative, not evidence of an effect either way.
+  of the launch date. Weighting by each *event's* own impact instead
+  (`--event-impact-col ai_interest_index`, so a launch that visibly moved
+  search interest more — like ChatGPT's own +5.6 pre/post mean shift —
+  counts more than one that barely moved it) gives the same null again:
+  every post-launch coefficient stays insignificant (p>0.16), and the one
+  borderline pre-period bin from the unweighted run (event_time=-6) drops
+  to p=0.06, no longer even nominally significant. The individual-event
+  regressions are degenerate (see above) rather than merely noisy, and
+  the individual fuzzy-RD estimates have standard errors several times
+  larger than their point estimates — uninformative, not evidence of an
+  effect either way.
 - **Texas small-claims filings/dispositions**: essentially a null in the
   pooled analysis too. `small_claims_filings` has one significant
   coefficient right at launch month (event_time=0: -463, p=0.021) but
