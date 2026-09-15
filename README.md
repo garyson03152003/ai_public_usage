@@ -252,7 +252,13 @@ python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appe
 python -m src.analysis.stacked_event_study --outcome small_claims_filings --window 6
 python -m src.analysis.stacked_event_study --outcome small_claims_dispositions --window 6
 
-python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6
+# --no-trim: use the full +/-6 window for every event even where a
+# neighboring launch falls inside it (e.g. gpt4o and claude35_sonnet are
+# only 1 month apart), accepting some cross-event contamination in
+# exchange for every event-time bin having all 12 events' support instead
+# of the 1-4 events it gets under the default neighbor-trimmed windows
+# above (see the trimming table in the stacked_event_study.py notes below).
+python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim
 
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
@@ -338,14 +344,24 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   *before* the launch date even happens (a pre-trend), which is exactly
   the kind of noise the pooled design exists to average out.
 - **NYC parking-ticket appeals**: also a null in the pooled analysis — no
-  coefficient post-launch reaches significance (all p>0.3), no
-  consistent direction. This already controls for seasonality via the
-  pooled model's calendar-month fixed effect (see above — identified by
-  pooling across the 12 launches' differing calendar months, not by
-  widening this outcome's own window). The individual-event regressions
-  are degenerate (see above) rather than merely noisy, and the individual
-  fuzzy-RD estimates have standard errors several times larger than their
-  point estimates — uninformative, not evidence of an effect either way.
+  coefficient post-launch reaches significance (all p>0.15), no
+  consistent direction (using `--no-trim`, which accepts some cross-event
+  contamination in exchange for every event-time bin getting all 12
+  events' support — see above; the neighbor-trimmed version has fewer
+  observations per far bin but shows the same null). This already
+  controls for seasonality via the pooled model's calendar-month fixed
+  effect (see above — identified by pooling across the 12 launches'
+  differing calendar months, not by widening this outcome's own window).
+  With `--no-trim`, event_time=-6 is the one significant bin (p=0.023,
+  coef=-1026), but it sits alongside similarly-sized, insignificant
+  negative coefficients on both sides of the launch date rather than a
+  clean pre/post break — read as a smooth, unrelated dip-and-recovery
+  partly produced by neighboring launches' own windows bleeding into each
+  other, not evidence of a launch effect. The individual-event
+  regressions are degenerate (see above) rather than merely noisy, and
+  the individual fuzzy-RD estimates have standard errors several times
+  larger than their point estimates — uninformative, not evidence of an
+  effect either way.
 - **Texas small-claims filings/dispositions**: essentially a null in the
   pooled analysis too. `small_claims_filings` has one significant
   coefficient right at launch month (event_time=0: -463, p=0.021) but
