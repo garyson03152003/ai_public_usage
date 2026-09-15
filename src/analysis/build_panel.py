@@ -1,15 +1,17 @@
 """Build the monthly state x year x month panel used by the event-study
 and fuzzy-RD scripts: AI search interest (from the monthly Trends fetch)
 joined with this project's monthly-resolution government-usage metrics --
-UI first-payment processing time (all states) and NYC parking-ticket
-hearing/appeal volume (New York only) -- plus the UI control (state
+UI first-payment processing time (all states), NYC parking-ticket
+hearing/appeal volume (New York only), and Texas small-claims (Justice
+Court) filings/dispositions (Texas only) -- plus the UI control (state
 unemployment rate).
 
 This is a distinct, narrower panel from combine.py's annual
 combined_state_data.csv -- it exists because event-time analysis around
-specific launch dates needs monthly resolution, which court-stats data
-still doesn't have (see the main README) but parking-ticket data now
-does, via `fetch_socrata.py --granularity month`.
+specific launch dates needs monthly resolution, which most court-stats
+sources don't have (see the main README), but parking-ticket data (via
+`fetch_socrata.py --granularity month`) and Texas's small-claims data (via
+`fetch_tx_card.py`) now do.
 
 Usage:
     python -m src.analysis.build_panel
@@ -28,6 +30,7 @@ TRENDS_MONTHLY_PANEL = ROOT / "data" / "processed" / "trends_state_month.csv"
 UI_MONTHLY_PATH = ROOT / "data" / "raw" / "unemployment" / "eta9050_state_month.csv"
 CONTROLS_MONTHLY_PATH = ROOT / "data" / "raw" / "controls" / "bls_unemployment_rate_monthly.csv"
 PARKING_MONTHLY_DIR = ROOT / "data" / "raw" / "parking_tickets_monthly"
+TX_CARD_PATH = ROOT / "data" / "raw" / "court_stats" / "tx_justice_court_civil_month.csv"
 OUTPUT_PATH = ROOT / "data" / "processed" / "analysis_panel_state_month.csv"
 
 ALL_STATES = pd.DataFrame({"state": list(US_STATE_TO_ABBR.keys())})
@@ -79,17 +82,34 @@ def load_parking_monthly(parking_dir: Path = PARKING_MONTHLY_DIR) -> pd.DataFram
     )
 
 
+def load_tx_small_claims_monthly(path: Path = TX_CARD_PATH) -> pd.DataFrame:
+    """Read fetch_tx_card.py output and pivot out the Small Claims case
+    type into its own filings/dispositions columns. Texas-only, same
+    single-state caveat as the NYC parking columns."""
+    columns = ["state", "year", "month", "small_claims_filings", "small_claims_dispositions"]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    df = pd.read_csv(path)
+    small_claims = df[df["case_type"] == "Small Claims"].copy()
+    if small_claims.empty:
+        return pd.DataFrame(columns=columns)
+    small_claims = small_claims.rename(columns={"filings": "small_claims_filings", "dispositions": "small_claims_dispositions"})
+    return small_claims[columns]
+
+
 def build(
     trends_path: Path = TRENDS_MONTHLY_PANEL,
     ui_path: Path = UI_MONTHLY_PATH,
     controls_path: Path = CONTROLS_MONTHLY_PATH,
     parking_dir: Path = PARKING_MONTHLY_DIR,
+    tx_card_path: Path = TX_CARD_PATH,
     output_path: Path = OUTPUT_PATH,
 ) -> pd.DataFrame:
     trends = load_trends_monthly(trends_path)
     ui = load_ui_monthly(ui_path)
     controls = load_controls_monthly(controls_path)
     parking = load_parking_monthly(parking_dir)
+    tx_small_claims = load_tx_small_claims_monthly(tx_card_path)
 
     if trends.empty:
         raise FileNotFoundError(
@@ -106,6 +126,7 @@ def build(
         .merge(ui, on=["state", "year", "month"], how="left")
         .merge(controls, on=["state", "year", "month"], how="left")
         .merge(parking, on=["state", "year", "month"], how="left")
+        .merge(tx_small_claims, on=["state", "year", "month"], how="left")
     )
     panel.insert(1, "state_abbr", panel["state"].map(US_STATE_TO_ABBR))
     panel = panel.sort_values(["state", "year", "month"]).reset_index(drop=True)

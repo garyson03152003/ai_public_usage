@@ -1,0 +1,241 @@
+state,year,month,case_type,filings,dispositions
+Texas,2020,1,Debt Claim,28068,31470
+Texas,2020,1,Landlord/Tenant,26311,25121
+Texas,2020,1,Small Claims,6443,5698
+Texas,2020,2,Debt Claim,23180,27345
+Texas,2020,2,Landlord/Tenant,23537,22136
+Texas,2020,2,Small Claims,5659,5151
+Texas,2020,3,Debt Claim,26283,23480
+Texas,2020,3,Landlord/Tenant,11978,14287
+Texas,2020,3,Small Claims,4734,4076
+Texas,2020,4,Debt Claim,9761,10475
+Texas,2020,4,Landlord/Tenant,1521,1540
+Texas,2020,4,Small Claims,2214,1498
+Texas,2020,5,Debt Claim,15016,11210
+Texas,2020,5,Landlord/Tenant,4641,2933
+Texas,2020,5,Small Claims,2873,2258
+Texas,2020,6,Debt Claim,21403,18795
+Texas,2020,6,Landlord/Tenant,10211,14584
+Texas,2020,6,Small Claims,4521,3175
+Texas,2020,7,Debt Claim,24761,19251
+Texas,2020,7,Landlord/Tenant,9107,9364
+Texas,2020,7,Small Claims,4247,4302
+Texas,2020,8,Debt Claim,19729,22568
+Texas,2020,8,Landlord/Tenant,10636,8263
+Texas,2020,8,Small Claims,4240,4262
+Texas,2020,9,Debt Claim,22584,25162
+Texas,2020,9,Landlord/Tenant,10182,11920
+Texas,2020,9,Small Claims,4888,5103
+Texas,2020,10,Debt Claim,20144,24288
+Texas,2020,10,Landlord/Tenant,9953,8749
+Texas,2020,10,Small Claims,5155,4517
+Texas,2020,11,Debt Claim,21974,18624
+Texas,2020,11,Landlord/Tenant,10743,7870
+Texas,2020,11,Small Claims,4073,4132
+Texas,2020,12,Debt Claim,30150,18367
+Texas,2020,12,Landlord/Tenant,11996,9464
+Texas,2020,12,Small Claims,4147,4195
+Texas,2021,1,Debt Claim,27802,22730
+Texas,2021,1,Landlord/Tenant,11654,8895
+Texas,2021,1,Small Claims,4345,3851
+Texas,2021,2,Debt Claim,24608,16861
+Texas,2021,2,Landlord/Tenant,7858,6991
+Texas,2021,2,Small Claims,3377,3222
+Texas,2021,3,Debt Claim,35071,24226
+Texas,2021,3,Landlord/Tenant,12207,11541
+Texas,2021,3,Small Claims,5342,5037
+Texas,2021,4,Debt Claim,31399,24531
+Texas,2021,4,Landlord/Tenant,10107,11757
+Texas,2021,4,Small Claims,5260,4580
+Texas,2021,5,Debt Claim,29060,25259
+Texas,2021,5,Landlord/Tenant,10039,11681
+Texas,2021,5,Small Claims,4570,5048
+Texas,2021,6,Debt Claim,22944,25701
+Texas,2021,6,Landlord/Tenant,11721,12510
+Texas,2021,6,Small Claims,5643,5414
+Texas,2021,7,Debt Claim,25621,23982
+Texas,2021,7,Landlord/Tenant,11861,11580
+Texas,2021,7,Small Claims,4924,5231
+Texas,2021,8,Debt Claim,23552,28700
+Texas,2021,8,Landlord/Tenant,13164,12505
+Texas,2021,8,Small Claims,4934,5363
+Texas,2021,9,Debt Claim,22156,27667
+Texas,2021,9,Landlord/Tenant,16582,13777
+Texas,2021,9,Small Claims,4977,4916
+Texas,2021,10,Debt Claim,21593,27269
+Texas,2021,10,Landlord/Tenant,16876,15573
+Texas,2021,10,Small Claims,4799,5216
+Texas,2021,11,Debt Claim,20191,24053
+Texas,2021,11,Landlord/Tenant,16071,14961
+Texas,2021,11,Small Claims,4671,4991
+Texas,2021,12,Debt Claim,20774,23151
+Texas,2021,12,Landlord/Tenant,15664,15480
+Texas,2021,12,Small Claims,4648,4022
+Texas,2022,1,Debt Claim,14824,23292
+Texas,2022,1,Landlord/Tenant,22025,18260
+Texas,2022,1,Small Claims,4422,4462
+Texas,2022,2,Debt Claim,10546,22080
+Texas,2022,2,Landlord/Tenant,22923,19191
+Texas,2022,2,Small Claims,3965,4548
+Texas,2022,3,Debt Claim,21834,24317
+Texas,2022,3,Landlord/Tenant,23773,27007
+Texas,2022,3,Small Claims,6108,5367
+Texas,2022,4,Debt Claim,20684,22587
+Texas,2022,4,Landlord/Tenant,20991,21767
+Texas,2022,4,Small Claims,4814,4693
+Texas,2022,5,Debt Claim,22224,22206
+Texas,2022,5,Landlord/Tenant,22872,22645
+Texas,2022,5,Small Claims,6559,5900
+Texas,2022,6,Debt Claim,18099,20978
+Texas,2022,6,Landlord/Tenant,25106,23788
+Texas,2022,6,Small Claims,5082,5119
+Texas,2022,7,Debt Claim,17628,20611
+Texas,2022,7,Landlord/Tenant,25884,23966
+Texas,2022,7,Small Claims,4719,4263
+Texas,2022,8,Debt Claim,25963,26798
+Texas,2022,8,Landlord/Tenant,28127,29393
+Texas,2022,8,Small Claims,5303,5443
+Texas,2022,9,Debt Claim,19388,25423
+Texas,2022,9,Landlord/Tenant,26134,24608
+Texas,2022,9,Small Claims,5053,4906
+Texas,2022,10,Debt Claim,27348,20789
+Texas,2022,10,Landlord/Tenant,25213,24533
+Texas,2022,10,Small Claims,4800,4941
+Texas,2022,11,Debt Claim,21969,19931
+Texas,2022,11,Landlord/Tenant,23074,24691
+Texas,2022,11,Small Claims,4606,4263
+Texas,2022,12,Debt Claim,21864,17323
+Texas,2022,12,Landlord/Tenant,23156,21548
+Texas,2022,12,Small Claims,5628,3800
+Texas,2023,1,Debt Claim,24791,20843
+Texas,2023,1,Landlord/Tenant,25274,23724
+Texas,2023,1,Small Claims,4942,4248
+Texas,2023,2,Debt Claim,30202,19321
+Texas,2023,2,Landlord/Tenant,23721,24929
+Texas,2023,2,Small Claims,5028,4446
+Texas,2023,3,Debt Claim,28157,23138
+Texas,2023,3,Landlord/Tenant,23126,26710
+Texas,2023,3,Small Claims,5575,5510
+Texas,2023,4,Debt Claim,26352,22026
+Texas,2023,4,Landlord/Tenant,21886,19717
+Texas,2023,4,Small Claims,4732,4762
+Texas,2023,5,Debt Claim,26829,28053
+Texas,2023,5,Landlord/Tenant,25490,26088
+Texas,2023,5,Small Claims,5256,5605
+Texas,2023,6,Debt Claim,23944,25585
+Texas,2023,6,Landlord/Tenant,26476,24860
+Texas,2023,6,Small Claims,5463,5162
+Texas,2023,7,Debt Claim,19107,25576
+Texas,2023,7,Landlord/Tenant,27018,25084
+Texas,2023,7,Small Claims,4997,5762
+Texas,2023,8,Debt Claim,28120,27761
+Texas,2023,8,Landlord/Tenant,29015,32319
+Texas,2023,8,Small Claims,5372,5550
+Texas,2023,9,Debt Claim,22434,26020
+Texas,2023,9,Landlord/Tenant,26742,25233
+Texas,2023,9,Small Claims,4939,4570
+Texas,2023,10,Debt Claim,27312,26756
+Texas,2023,10,Landlord/Tenant,29081,29301
+Texas,2023,10,Small Claims,5201,5151
+Texas,2023,11,Debt Claim,28464,23171
+Texas,2023,11,Landlord/Tenant,25278,26103
+Texas,2023,11,Small Claims,4966,4757
+Texas,2023,12,Debt Claim,24017,20494
+Texas,2023,12,Landlord/Tenant,23067,21555
+Texas,2023,12,Small Claims,4440,4399
+Texas,2024,1,Debt Claim,33190,24494
+Texas,2024,1,Landlord/Tenant,29426,29034
+Texas,2024,1,Small Claims,4809,5118
+Texas,2024,2,Debt Claim,35931,27364
+Texas,2024,2,Landlord/Tenant,26714,28339
+Texas,2024,2,Small Claims,5374,5342
+Texas,2024,3,Debt Claim,28133,27924
+Texas,2024,3,Landlord/Tenant,21847,24116
+Texas,2024,3,Small Claims,5068,5260
+Texas,2024,4,Debt Claim,34845,33217
+Texas,2024,4,Landlord/Tenant,23784,23121
+Texas,2024,4,Small Claims,5598,5601
+Texas,2024,5,Debt Claim,30916,31168
+Texas,2024,5,Landlord/Tenant,25456,24784
+Texas,2024,5,Small Claims,5212,5637
+Texas,2024,6,Debt Claim,31654,29895
+Texas,2024,6,Landlord/Tenant,26697,23058
+Texas,2024,6,Small Claims,4985,4764
+Texas,2024,7,Debt Claim,27582,28385
+Texas,2024,7,Landlord/Tenant,27960,28055
+Texas,2024,7,Small Claims,5468,5004
+Texas,2024,8,Debt Claim,35166,31754
+Texas,2024,8,Landlord/Tenant,28051,29671
+Texas,2024,8,Small Claims,5371,5432
+Texas,2024,9,Debt Claim,31954,28528
+Texas,2024,9,Landlord/Tenant,27630,26165
+Texas,2024,9,Small Claims,5501,5199
+Texas,2024,10,Debt Claim,30845,32376
+Texas,2024,10,Landlord/Tenant,26676,29650
+Texas,2024,10,Small Claims,6094,5858
+Texas,2024,11,Debt Claim,30188,26912
+Texas,2024,11,Landlord/Tenant,23018,19630
+Texas,2024,11,Small Claims,4589,4389
+Texas,2024,12,Debt Claim,38373,25118
+Texas,2024,12,Landlord/Tenant,25218,24043
+Texas,2024,12,Small Claims,4286,4562
+Texas,2025,1,Debt Claim,35060,25977
+Texas,2025,1,Landlord/Tenant,29159,29588
+Texas,2025,1,Small Claims,5040,5750
+Texas,2025,2,Debt Claim,30888,26936
+Texas,2025,2,Landlord/Tenant,25534,27313
+Texas,2025,2,Small Claims,5112,5013
+Texas,2025,3,Debt Claim,40617,29091
+Texas,2025,3,Landlord/Tenant,22490,25361
+Texas,2025,3,Small Claims,5602,5093
+Texas,2025,4,Debt Claim,42934,35768
+Texas,2025,4,Landlord/Tenant,22150,22659
+Texas,2025,4,Small Claims,5537,5354
+Texas,2025,5,Debt Claim,40680,34954
+Texas,2025,5,Landlord/Tenant,24973,22191
+Texas,2025,5,Small Claims,5042,9662
+Texas,2025,6,Debt Claim,39737,36202
+Texas,2025,6,Landlord/Tenant,26088,23717
+Texas,2025,6,Small Claims,5191,5382
+Texas,2025,7,Debt Claim,50762,35752
+Texas,2025,7,Landlord/Tenant,28035,28526
+Texas,2025,7,Small Claims,5858,5306
+Texas,2025,8,Debt Claim,45871,35918
+Texas,2025,8,Landlord/Tenant,26847,25042
+Texas,2025,8,Small Claims,5606,5266
+Texas,2025,9,Debt Claim,50623,39050
+Texas,2025,9,Landlord/Tenant,27989,28427
+Texas,2025,9,Small Claims,5781,6212
+Texas,2025,10,Debt Claim,52850,43740
+Texas,2025,10,Landlord/Tenant,27152,28922
+Texas,2025,10,Small Claims,6126,5733
+Texas,2025,11,Debt Claim,37858,29392
+Texas,2025,11,Landlord/Tenant,21900,19352
+Texas,2025,11,Small Claims,4265,4164
+Texas,2025,12,Debt Claim,49376,31818
+Texas,2025,12,Landlord/Tenant,24270,25298
+Texas,2025,12,Small Claims,5214,4247
+Texas,2026,1,Debt Claim,53701,31533
+Texas,2026,1,Landlord/Tenant,22853,23134
+Texas,2026,1,Small Claims,5076,4929
+Texas,2026,2,Debt Claim,65463,38152
+Texas,2026,2,Landlord/Tenant,25479,23392
+Texas,2026,2,Small Claims,5611,4694
+Texas,2026,3,Debt Claim,51892,46545
+Texas,2026,3,Landlord/Tenant,22332,26378
+Texas,2026,3,Small Claims,6153,5292
+Texas,2026,4,Debt Claim,54630,44216
+Texas,2026,4,Landlord/Tenant,22937,21872
+Texas,2026,4,Small Claims,5799,5047
+Texas,2026,5,Debt Claim,50438,44007
+Texas,2026,5,Landlord/Tenant,23654,21798
+Texas,2026,5,Small Claims,5012,4971
+Texas,2026,6,Debt Claim,55230,45036
+Texas,2026,6,Landlord/Tenant,25148,23669
+Texas,2026,6,Small Claims,4929,4941
+Texas,2026,7,Debt Claim,50433,43833
+Texas,2026,7,Landlord/Tenant,23911,23375
+Texas,2026,7,Small Claims,4682,4777
+Texas,2026,8,Debt Claim,22168,21093
+Texas,2026,8,Landlord/Tenant,11693,10962
+Texas,2026,8,Small Claims,2322,1975

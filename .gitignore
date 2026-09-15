@@ -12,3 +12,8 @@ __pycache__/
 /data/raw/controls/**
 !/data/raw/court_stats/.gitkeep
 !/data/raw/controls/.gitkeep
+# tx_justice_court_civil_month.csv IS committed (see below) -- unlike the
+# rest of court_stats/, this one has a real, working automated fetcher
+# (fetch_tx_card.py), so it's actual fetched data worth snapshotting, not
+# a placeholder for a manual-export path that never got used.
+!/data/raw/court_stats/tx_justice_court_civil_month.csv

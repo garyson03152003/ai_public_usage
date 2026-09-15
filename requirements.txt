@@ -7,3 +7,5 @@ pytest>=7.4
 statsmodels>=0.14
 matplotlib>=3.7
 numpy>=1.24
+xlrd>=2.0.1
+openpyxl>=3.1

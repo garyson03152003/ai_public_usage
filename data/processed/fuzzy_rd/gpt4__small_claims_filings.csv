@@ -1,0 +1,2 @@
+event,event_label,event_date,outcome,running_metric,bandwidth_months,first_stage_jump,first_stage_se,first_stage_n,reduced_form_jump,reduced_form_se,reduced_form_n,fuzzy_rd_late,fuzzy_rd_late_se_approx
+gpt4,GPT-4 release,2023-03-14,small_claims_filings,ai_interest_index,6,2.857175235123278,0.5932355125036092,663,160.54315713936924,348.9215986615994,13,56.18946824325331,122.6771846774769

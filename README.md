@@ -9,11 +9,13 @@ Data pipeline that compiles two things side by side, by US state, for
    ChatGPT/OpenAI, Gemini, Copilot, Perplexity, DeepSeek, Llama, Grok,
    Mistral, ...).
 2. **Public-resource usage** — state-level civil/small-claims court
-   caseloads and processing times, NYC parking-ticket hearing/appeal
-   volume as an illustrative city case study, and state unemployment-
-   insurance first-payment processing time, alongside a control variable
-   (state unemployment rate) so the UI processing-time numbers aren't
-   compared without accounting for claim-volume pressure.
+   caseloads and processing times (annual nationwide where available, plus
+   genuine MONTHLY, statewide small-claims filings/dispositions for Texas —
+   see below), NYC parking-ticket hearing/appeal volume as an illustrative
+   city case study, and state unemployment-insurance first-payment
+   processing time, alongside a control variable (state unemployment rate)
+   so the UI processing-time numbers aren't compared without accounting
+   for claim-volume pressure.
 
 The two are merged into one state x year panel
 (`data/processed/combined_state_data.csv`) for exploratory analysis.
@@ -39,6 +41,7 @@ src/
   combine_trends_monthly.py   # merges data/raw/trends_monthly/* -> data/processed/trends_state_month.csv
   gov_usage/
     fetch_court_stats.py     # data.gov CKAN attempt + manual-export normalizer for court caseload data
+    fetch_tx_card.py         # Texas Court Activity Reporting Database: genuine MONTHLY small-claims data
     fetch_socrata.py         # Socrata (SODA API) fetcher, aggregated per year, for city portals
     fetch_unemployment.py    # DOL ETA 9050: UI first-payment processing time, by state x year
     fetch_bls_controls.py    # BLS LAUS: state unemployment rate, the control variable for the above
@@ -81,6 +84,7 @@ python -m src.combine_trends_monthly   # -> data/processed/trends_state_month.cs
 
 # 2. Government usage data
 python -m src.gov_usage.fetch_court_stats          # best-effort data.gov download attempt, see caveat below
+python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-08   # Texas MONTHLY small-claims data, see below
 python -m src.gov_usage.fetch_socrata              # pulls city portals enabled in sources.yaml, 2020-present
 python -m src.gov_usage.fetch_unemployment         # DOL ETA 9050, all states, 2020-present
 python -m src.gov_usage.fetch_bls_controls         # BLS state unemployment rate (the control variable)
@@ -119,16 +123,41 @@ and normalize them with that function — see the docstring in
   usage data below is only available annually, so joining it onto a
   monthly grid would just repeat each year's value 12 times without
   adding information.
-- **State court caseloads** — no working automated nationwide source as
-  of 2026 (see above); use the NCSC manual-export path. Confirmed live
-  (not assumed) that NCSC's Tableau-hosted dashboards support a simple
-  `<view>.csv` export for KPI-style views, including confirming "Small
-  Claims" is a real case-type category in their data — but the specific
-  by-state dashboards need Tableau's interactive "Download Crosstab"
-  feature, which runs over a WebSocket session this sandbox's proxy
-  doesn't support; see `fetch_court_stats.py`'s docstring for the full
-  trail. Once normalized, `combine.py` keeps every (state, year) row
-  rather than collapsing to a single snapshot.
+- **State court caseloads** — no working automated *nationwide* source as
+  of 2026 (see above); use the NCSC manual-export path for other states.
+  Confirmed live (not assumed) that NCSC's Tableau-hosted dashboards
+  support a simple `<view>.csv` export for KPI-style views, including
+  confirming "Small Claims" is a real case-type category in their data —
+  but the specific by-state dashboards need Tableau's interactive
+  "Download Crosstab" feature, which runs over a WebSocket session this
+  sandbox's proxy doesn't support; see `fetch_court_stats.py`'s docstring
+  for the full trail. Once normalized, `combine.py` keeps every (state,
+  year) row rather than collapsing to a single snapshot.
+
+  **Texas is the exception, and the only source in this project with
+  genuine MONTHLY small-claims resolution.** The Texas Office of Court
+  Administration runs its own query tool, the Court Activity Reporting
+  Database (`card.txcourts.gov`), with an explicit from/to month+year
+  picker for its "Justice Court Activity Detail" report — confirmed live
+  by driving the tool's classic ASP.NET WebForms postback sequence with
+  plain `requests` (no browser needed) and checking that the returned
+  figures actually change per month requested (e.g. January 2020 alone
+  returns different, internally consistent numbers from the full 2020
+  calendar year). `fetch_tx_card.py` automates this end to end: one
+  session setup, then one request per month, statewide, parsing the
+  returned Crystal-Reports `.xls` export's "CIVIL CASES" section for
+  filings ("New Cases Filed") and dispositions ("Total Cases Disposed")
+  across Debt Claim / Landlord-Tenant / Small Claims. Coverage: Texas
+  only, 9/2013-present (the "HB79" reporting period), and each month's
+  export reports its own reporting-completeness rate (typically >90%,
+  self-reported by county courts to OCA) which isn't captured per-row
+  here — see the module docstring for the full postback trail, including
+  the wrong-URL 500 error hit and fixed along the way. `build_panel.py`
+  pulls this into the monthly analysis panel as `small_claims_filings`/
+  `small_claims_dispositions` (Texas-only, same single-state caveat as
+  the NYC parking columns below); `combine.py` rolls it up to annual and
+  merges it into the same `small_claims_filings` column the NCSC
+  manual-export path would otherwise populate, so either source works.
 - **Parking ticket appeals** — there is no national dataset. This repo
   ships one verified source: NYC's "Open Parking and Camera Violations"
   (Socrata dataset `nc67-uf89` on `data.cityofnewyork.us`), which has a
@@ -186,11 +215,13 @@ so gaps are explicit rather than silently blank.
 `src/analysis/` asks a sharper question than "did AI interest and public-
 resource usage both rise over time": does a specific model/service launch
 coincide with a shift in a usage metric, right around that date? This
-needs monthly resolution, which still rules out court-stats data (annual
-only) -- AI search interest, UI first-payment processing time, and (as of
-`fetch_socrata.py --granularity month`) NYC parking-ticket hearing/appeal
-volume are all available monthly, so those are the outcomes this analysis
-can use (parking is NYC-only, same as the annual version).
+needs monthly resolution, which rules out most court-stats data (annual
+only) -- AI search interest, UI first-payment processing time, NYC
+parking-ticket hearing/appeal volume (`fetch_socrata.py --granularity
+month`), and now Texas small-claims filings/dispositions
+(`fetch_tx_card.py`) are all available monthly, so those are the outcomes
+this analysis can use (parking is NYC-only and small-claims is Texas-only,
+same single-state caveat as the annual versions).
 
 ```bash
 # Needs the monthly Trends fetch (see above), fetch_unemployment.py (which
@@ -207,16 +238,19 @@ python -m src.analysis.event_study --event deepseek_r1 --outcome ui_pct_within_2
 # usage outcome (reduced form) right at the launch date, ratio = LATE.
 python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_21_days
 
-# The parking outcome only has data for New York, so after dropping
-# other states' NaN rows the "state fixed effects" term in
-# event_study.py/stacked_event_study.py has just one category and
-# contributes nothing beyond the intercept. Worse for a SINGLE event: with
-# one state, one observation per relative-month, and one dummy per
-# relative-month, the model is fully saturated (R-squared = 1.0, SEs are
-# NaN) -- it fits perfectly and says nothing. Only the pooled/stacked
-# version below is actually informative for this outcome, since pooling
-# 12 events supplies multiple observations per relative-month bin.
+# The parking outcome only has data for New York, and the small-claims
+# outcomes only for Texas, so after dropping other states' NaN rows the
+# "state fixed effects" term in event_study.py/stacked_event_study.py has
+# just one category and contributes nothing beyond the intercept. Worse
+# for a SINGLE event: with one state, one observation per relative-month,
+# and one dummy per relative-month, the model is fully saturated
+# (R-squared = 1.0, SEs are NaN) -- it fits perfectly and says nothing.
+# Only the pooled/stacked version below is actually informative for these
+# outcomes, since pooling 12 events supplies multiple observations per
+# relative-month bin.
 python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appeal_records  # degenerate, see above
+python -m src.analysis.stacked_event_study --outcome small_claims_filings --window 6
+python -m src.analysis.stacked_event_study --outcome small_claims_dispositions --window 6
 
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
@@ -271,17 +305,18 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   event's date — for events from late 2022 onward this means waiting for
   most of the ~1600-request monthly fetch to complete.
 - Cluster-robust (by-state) standard errors need at least 2 clusters; the
-  parking outcome only has one (New York), which divides by zero in
-  statsmodels' small-cluster correction. All three scripts detect a
-  single-cluster outcome and fall back to HC1 heteroskedasticity-robust
-  SEs instead, printing a note when they do. A worse case for parking
-  specifically: `event_study.py`/`fuzzy_rd.py` on a *single* event with
-  a *single* state have only one observation per relative-month, so a
-  full set of event-time dummies fits it exactly (R-squared = 1.0, SEs
-  are NaN) — the per-event parking regressions are mathematically
-  uninformative, not just noisy. Only `stacked_event_study.py`'s pooled
-  version, which supplies multiple observations per relative-month by
-  combining all 12 events, produces a meaningful result for this outcome.
+  parking outcome only has one (New York) and the small-claims outcomes
+  only have one (Texas), which divides by zero in statsmodels'
+  small-cluster correction. All three scripts detect a single-cluster
+  outcome and fall back to HC1 heteroskedasticity-robust SEs instead,
+  printing a note when they do. A worse case for both: `event_study.py`/
+  `fuzzy_rd.py` on a *single* event with a *single* state have only one
+  observation per relative-month, so a full set of event-time dummies
+  fits it exactly (R-squared = 1.0, SEs are NaN) — the per-event
+  regressions are mathematically uninformative, not just noisy. Only
+  `stacked_event_study.py`'s pooled version, which supplies multiple
+  observations per relative-month by combining all 12 events, produces a
+  meaningful result for these outcomes.
 
 ### What the results actually show (last run against real data)
 
@@ -301,10 +336,32 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   (see above) rather than merely noisy, and the individual fuzzy-RD
   estimates have standard errors several times larger than their point
   estimates — uninformative, not evidence of an effect either way.
+- **Texas small-claims filings/dispositions**: essentially a null in the
+  pooled analysis too. `small_claims_filings` has one significant
+  coefficient right at launch month (event_time=0: -463, p=0.021) but
+  every other post-launch bin (months 1-5) is insignificant with mixed
+  signs, and the pre-period includes an even larger significant swing at
+  event_time=-6 (+1345, p<0.001) driven by ordinary month-to-month filing
+  volume differences rather than anything launch-related — with 12
+  event-time bins tested, one being "significant" in isolation isn't
+  strong evidence by itself. `small_claims_dispositions` shows the same
+  pattern (only event_time=+4 significant, p=0.022, surrounded by
+  insignificant neighbors). Individual-event fuzzy-RD checks (single
+  state, single event) are far too noisy to read on their own -- e.g.
+  chatgpt_launch's small_claims_filings LATE has a standard error ~6x its
+  point estimate.
 - Bottom line: strong evidence AI launches move search interest; no
-  credible evidence, in either government-usage outcome tested, that
-  they shift how fast state agencies process unemployment claims or how
-  NYC's parking-ticket appeals process runs.
+  credible evidence, in any of the three government-usage outcomes
+  tested (UI processing time, NYC parking appeals, Texas small-claims
+  filings/dispositions), that they shift how fast or how much these
+  public services get used or processed.
+
+Caveat on this run specifically: BLS's anonymous LAUS API quota (25
+queries/day, shared per source IP) was already exhausted when re-running
+this analysis, so `unemployment_rate` (the claim-volume control for the UI
+outcome) wasn't available and the numbers above for `small_claims_*`
+were run without a `--controls` argument. Re-run `fetch_bls_controls.py`
+(optionally with `--api-key`) to restore it.
 
 ## Tests
 

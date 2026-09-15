@@ -41,6 +41,7 @@ from src.us_states import US_STATE_TO_ABBR, normalize_state_name
 ROOT = Path(__file__).resolve().parent.parent
 TRENDS_DIR = ROOT / "data" / "raw" / "trends"
 COURT_STATS_DIR = ROOT / "data" / "raw" / "court_stats"
+TX_CARD_MONTHLY_PATH = COURT_STATS_DIR / "tx_justice_court_civil_month.csv"
 PARKING_DIR = ROOT / "data" / "raw" / "parking_tickets"
 UNEMPLOYMENT_DIR = ROOT / "data" / "raw" / "unemployment"
 CONTROLS_DIR = ROOT / "data" / "raw" / "controls"
@@ -117,6 +118,26 @@ def load_court_stats(court_stats_dir: Path = COURT_STATS_DIR) -> pd.DataFrame:
     return panel
 
 
+def load_tx_small_claims_annual(tx_card_path: Path = TX_CARD_MONTHLY_PATH) -> pd.DataFrame:
+    """Roll up fetch_tx_card.py's monthly Texas small-claims data (the one
+    source in this project with genuine month-level resolution -- see that
+    module's docstring) to one row per year, in the same
+    small_claims_filings column load_court_stats produces, so the two
+    sources combine rather than compete. avg_processing_days isn't
+    available from this source (only filing/disposition counts), so it's
+    left NaN here."""
+    if not tx_card_path.exists():
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    df = pd.read_csv(tx_card_path)
+    small_claims = df[df["case_type"] == "Small Claims"]
+    if small_claims.empty:
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    return small_claims.groupby(["state", "year"], as_index=False).agg(
+        small_claims_filings=("filings", "sum"),
+        small_claims_dispositions=("dispositions", "sum"),
+    )
+
+
 def load_parking_tickets(parking_dir: Path = PARKING_DIR) -> pd.DataFrame:
     """Read the yearly violation_status-count CSVs produced by
     fetch_socrata.py and roll up to one row per (state, year):
@@ -178,6 +199,7 @@ def coverage_note(row: pd.Series) -> str:
 def combine(
     trends_dir: Path = TRENDS_DIR,
     court_stats_dir: Path = COURT_STATS_DIR,
+    tx_card_path: Path = TX_CARD_MONTHLY_PATH,
     parking_dir: Path = PARKING_DIR,
     unemployment_dir: Path = UNEMPLOYMENT_DIR,
     controls_dir: Path = CONTROLS_DIR,
@@ -189,6 +211,16 @@ def combine(
 
     trends = load_trends(trends_dir)
     court_stats = load_court_stats(court_stats_dir)
+    tx_small_claims = load_tx_small_claims_annual(tx_card_path)
+    if not tx_small_claims.empty:
+        court_stats = (
+            court_stats.merge(tx_small_claims, on=["state", "year"], how="outer", suffixes=("", "_tx"))
+            if not court_stats.empty
+            else tx_small_claims
+        )
+        if "small_claims_filings_tx" in court_stats.columns:
+            court_stats["small_claims_filings"] = court_stats["small_claims_filings"].fillna(court_stats["small_claims_filings_tx"])
+            court_stats = court_stats.drop(columns=["small_claims_filings_tx"])
     parking = load_parking_tickets(parking_dir)
     unemployment = load_unemployment(unemployment_dir)
     controls = load_controls(controls_dir)
