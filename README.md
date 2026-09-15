@@ -252,22 +252,7 @@ python -m src.analysis.event_study --event chatgpt_launch --outcome parking_appe
 python -m src.analysis.stacked_event_study --outcome small_claims_filings --window 6
 python -m src.analysis.stacked_event_study --outcome small_claims_dispositions --window 6
 
-# parking_appeal_records uses a wider +/-24 month window rather than the
-# +/-6 used elsewhere: the parking-ticket data is NYC-only, so the pooled
-# regression's calendar-month fixed effect benefits from every extra
-# calendar month of variety it can get. This does NOT require fetching
-# data further back than 2020: with no event before it, ChatGPT's launch
-# (Nov 2022) sets the earliest usable month at launch-minus-window, and
-# even a 24-36 month window only reaches back to late 2020/2021, which
-# `fetch_socrata.py`'s existing 2020-present fetch already covers in
-# full -- pre-2020 data literally can't enter this regression unless the
-# window exceeds ~34 months, at which point it stops being a "local"
-# launch comparison. (A live attempt to fetch further back anyway hit a
-# different, unrelated wall: NYC's unauthenticated Socrata endpoint was
-# timing out on every query when tried, including years already
-# successfully fetched before -- a temporary throttle/slowdown, not
-# something a wider date range would have fixed.)
-python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 24
+python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6
 
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
@@ -311,7 +296,12 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   at its nearest neighbor's own month (`--no-trim` disables this); this
   prevents double-counting a calendar month as both "after A" and "before
   B", but doesn't guarantee full independence from a neighboring launch's
-  lingering effect.
+  lingering effect. This calendar-month control applies at any window
+  width, including the narrow +/-6 months used for `parking_appeal_records`
+  above: it's the pooling across 12 launches landing in 12 different
+  calendar months that identifies seasonality, not how wide each launch's
+  own window is, so there's no need to widen a single outcome's window
+  just to get a seasonal control into the regression.
 - All three are validated in `tests/test_analysis.py` against synthetic
   panels with a known, engineered jump, not just run against real data
   and eyeballed — including a check that pooling multiple events (landing
@@ -349,19 +339,13 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   the kind of noise the pooled design exists to average out.
 - **NYC parking-ticket appeals**: also a null in the pooled analysis — no
   coefficient post-launch reaches significance (all p>0.3), no
-  consistent direction. The individual-event regressions are degenerate
-  (see above) rather than merely noisy, and the individual fuzzy-RD
-  estimates have standard errors several times larger than their point
-  estimates — uninformative, not evidence of an effect either way. Widening
-  this outcome's window to +/-24 months (see above) doesn't change that
-  conclusion — every post-launch coefficient (event_time 0 through 5) is
-  still insignificant (p>0.35) — but it does surface several significant
-  *pre*-launch swings (event_time -23, -21, -17, -13, -12, -11) with no
-  consistent sign or shape. Read these as noise rather than a real
-  pre-trend: this is still single-state (NY-only) data on HC1 robust SEs
-  with ~30 event-time bins now being tested and a modest 88 total
-  observations, so a handful of "significant" pre-period bins by chance is
-  expected, not a sign something real is happening 2 years before a launch.
+  consistent direction. This already controls for seasonality via the
+  pooled model's calendar-month fixed effect (see above — identified by
+  pooling across the 12 launches' differing calendar months, not by
+  widening this outcome's own window). The individual-event regressions
+  are degenerate (see above) rather than merely noisy, and the individual
+  fuzzy-RD estimates have standard errors several times larger than their
+  point estimates — uninformative, not evidence of an effect either way.
 - **Texas small-claims filings/dispositions**: essentially a null in the
   pooled analysis too. `small_claims_filings` has one significant
   coefficient right at launch month (event_time=0: -463, p=0.021) but
