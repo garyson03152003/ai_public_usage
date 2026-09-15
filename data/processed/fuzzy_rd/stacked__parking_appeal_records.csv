@@ -1,0 +1,2 @@
+n_events,outcome,running_metric,bandwidth_months,trim_to_neighbors,first_stage_jump,first_stage_se,first_stage_n,reduced_form_jump,reduced_form_se,reduced_form_n,fuzzy_rd_late,fuzzy_rd_late_se_approx
+12,parking_appeal_records,ai_interest_index,6,True,0.4108422167293953,0.24099743554214695,3621,-233.98264278004405,410.27466946795994,70,-569.5194730539552,1053.0176507176468

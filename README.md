@@ -53,6 +53,7 @@ src/
     event_study.py              # per-event regression: outcome by month relative to launch
     stacked_event_study.py       # pooled regression across all events at once (more reliable)
     fuzzy_rd.py                   # local-linear fuzzy RD at the launch date (Wald/IV estimate)
+    stacked_fuzzy_rd.py            # pooled fuzzy RD across all events at once (same idea as stacked_event_study.py)
 data/
   raw/          # one subfolder per source, gitignored (regenerate by re-running fetch_*.py)
   processed/    # combined_state_data.csv, gitignored
@@ -238,6 +239,12 @@ python -m src.analysis.event_study --event deepseek_r1 --outcome ui_pct_within_2
 # usage outcome (reduced form) right at the launch date, ratio = LATE.
 python -m src.analysis.fuzzy_rd --event chatgpt_launch --outcome ui_pct_within_21_days
 
+# Pooled fuzzy RD across all 12 launches at once -- same idea as
+# stacked_event_study.py, applied to the local-linear RD design instead:
+# individual per-event LATEs are too noisy (see below), so pool
+# state-months across events with state + event fixed effects.
+python -m src.analysis.stacked_fuzzy_rd --outcome parking_appeal_records --bandwidth 6
+
 # The parking outcome only has data for New York, and the small-claims
 # outcomes only for Texas, so after dropping other states' NaN rows the
 # "state fixed effects" term in event_study.py/stacked_event_study.py has
@@ -302,6 +309,29 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   their ratio (the standard Wald/IV formula). The reported LATE standard
   error is a delta-method approximation that ignores covariance between
   the two jump estimates — read it as directional, not exact.
+- `src/analysis/stacked_fuzzy_rd.py` — the same pooling idea as
+  `stacked_event_study.py`, applied to the local-linear RD design instead
+  of the event-time-dummy design: pools state-months across all N events
+  into one first-stage and one reduced-form local-linear regression, with
+  state and event fixed effects, rather than running `fuzzy_rd.py` once
+  per launch. Reuses `stacked_event_study.py`'s `build_stacked_panel()`
+  for the same neighbor-trimming logic (`--no-trim` disables it here
+  too). Deliberately does **not** add calendar-month fixed effects like
+  the event-study version does — a local-linear RD's job is to net out a
+  local *trend* right at the cutoff, not act as a full seasonally-adjusted
+  model, and stacking another FE dimension on top of state + event FE
+  within an already-narrow local window risks the same rank-deficiency
+  issue for little benefit. Validated in `tests/test_analysis.py`: on a
+  synthetic panel with a known jump ratio, the pooled estimate matches
+  the true ratio and has a meaningfully *tighter* standard error than a
+  single event's own `fuzzy_rd.py` estimate on the same data — pooling
+  does what it's supposed to. On real data it helps, but can't fix a
+  structural problem: parking's pooled first-stage jump (the discontinuity
+  in `ai_interest_index` right at the average cutoff) is itself small
+  (~0.4, comparable in size to its own SE), so the Wald ratio's
+  denominator is close to zero and the LATE stays wildly noisy (SE far
+  exceeding the point estimate) even after pooling substantially tightens
+  each jump's own SE relative to an unlucky single-event estimate.
 - `src/analysis/stacked_event_study.py` — the more reliable version: pools
   all 12 launches into one regression instead of running event_study.py
   once per launch. This has two real advantages, not just "more data":
@@ -428,7 +458,16 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   regressions are degenerate (see above) rather than merely noisy, and
   the individual fuzzy-RD estimates have standard errors several times
   larger than their point estimates — uninformative, not evidence of an
-  effect either way.
+  effect either way. Pooling the fuzzy-RD design too
+  (`stacked_fuzzy_rd.py`) doesn't rescue it: the pooled first-stage jump
+  (the discontinuity in `ai_interest_index` right at the average cutoff)
+  is itself only ~0.4 — comparable to its own standard error — so the
+  Wald ratio's denominator is close to zero and the resulting LATE
+  (-570, SE ~1053) stays wildly noisy even though pooling did tighten
+  each jump's own SE substantially versus an unlucky single event (e.g.
+  ChatGPT's own LATE SE alone is ~11,700 — pooling brings the typical
+  case down to ~1053, real progress, just not enough to rescue a ratio
+  whose denominator is this close to zero).
 - **Texas small-claims filings/dispositions**: essentially a null in the
   pooled analysis too. `small_claims_filings` has one significant
   coefficient right at launch month (event_time=0: -463, p=0.021) but

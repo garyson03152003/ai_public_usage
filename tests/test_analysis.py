@@ -8,6 +8,7 @@ from src.analysis.events import EVENTS, EVENTS_BY_KEY, Event, months_since
 from src.analysis.event_study import run_event_study
 from src.analysis.fuzzy_rd import fuzzy_rd
 from src.analysis.stacked_event_study import compute_event_impact_weights, event_time_bounds, run_stacked_event_study
+from src.analysis.stacked_fuzzy_rd import stacked_fuzzy_rd
 
 EVENT = EVENTS_BY_KEY["chatgpt_launch"]  # 2022-11-30
 
@@ -88,6 +89,60 @@ def test_fuzzy_rd_recovers_known_ratio():
     assert result["first_stage_jump"] == pytest.approx(20.0, abs=1.5)
     assert result["reduced_form_jump"] == pytest.approx(8.0, abs=1.5)
     assert result["fuzzy_rd_late"] == pytest.approx(0.4, abs=0.1)
+
+
+def _stacked_fuzzy_rd_panel(events: list[Event], true_jump: float, seed: int = 0, bandwidth: int = 8) -> pd.DataFrame:
+    """Like _synthetic_panel (linear drift + jump, deliberately no
+    seasonal confound -- local-linear RD only nets out a local trend, not
+    seasonality) but pooled across several well-separated events: for
+    each (state, calendar month), use whichever event's own +/-bandwidth
+    window contains that month (safe since these events' windows don't
+    overlap) to decide the local event_time, drift, and jump; months
+    outside every event's window are dropped rather than kept as
+    unrelated noise rows."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            active_et = None
+            for event in events:
+                et = months_since(year, month, event)
+                if abs(et) <= bandwidth:
+                    active_et = et
+                    break
+            if active_et is None:
+                continue
+            trend = 0.1 * active_et
+            jump = true_jump if active_et >= 0 else 0.0
+            noise = rng.normal(0, 0.5)
+            rows.append({"state": state, "year": year, "month": month, "y": state_effect[state] + trend + jump + noise})
+    return pd.DataFrame(rows)
+
+
+def test_stacked_fuzzy_rd_recovers_known_ratio_with_tighter_se_than_single_event():
+    events = _well_separated_events()
+    rng_state = 42
+    # Same true jump sizes/ratio as test_fuzzy_rd_recovers_known_ratio, pooled across 3 events.
+    first_stage_panel = _stacked_fuzzy_rd_panel(events, true_jump=20.0, seed=rng_state).rename(columns={"y": "ai_interest_index"})
+    reduced_form_panel = _stacked_fuzzy_rd_panel(events, true_jump=8.0, seed=rng_state + 1).rename(columns={"y": "outcome"})
+    panel = first_stage_panel.merge(reduced_form_panel, on=["state", "year", "month"])
+
+    pooled = stacked_fuzzy_rd(panel, events, outcome_col="outcome", running_metric_col="ai_interest_index", bandwidth=8)
+
+    assert pooled["first_stage_jump"] == pytest.approx(20.0, abs=1.5)
+    assert pooled["reduced_form_jump"] == pytest.approx(8.0, abs=1.5)
+    assert pooled["fuzzy_rd_late"] == pytest.approx(0.4, abs=0.1)
+
+    # The whole point of pooling: a tighter LATE SE than any single event's own fuzzy_rd.py estimate.
+    single = fuzzy_rd(panel, events[0], outcome_col="outcome", running_metric_col="ai_interest_index", bandwidth=8)
+    assert pooled["fuzzy_rd_late_se_approx"] < single["fuzzy_rd_late_se_approx"]
 
 
 def test_event_time_bounds_trims_near_close_neighbors():
