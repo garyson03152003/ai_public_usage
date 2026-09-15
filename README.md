@@ -260,6 +260,12 @@ python -m src.analysis.stacked_event_study --outcome small_claims_dispositions -
 # above (see the trimming table in the stacked_event_study.py notes below).
 python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim
 
+# --weight-col: run WLS instead of OLS, weighting each state-month by
+# ai_interest_index -- months with more actual AI search attention count
+# more toward the estimated impact, instead of every month counting
+# equally regardless of whether anyone was paying attention to AI at all.
+python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --weight-col ai_interest_index
+
 # Stacked/pooled event study across all 12 launches at once, instead of
 # one noisy regression per launch -- see below for why this is the more
 # reliable version.
@@ -308,12 +314,32 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   calendar months that identifies seasonality, not how wide each launch's
   own window is, so there's no need to widen a single outcome's window
   just to get a seasonal control into the regression.
+- `stacked_event_study.py --weight-col <column>` switches the regression
+  from OLS to WLS, weighted by that column (e.g. `ai_interest_index`):
+  state-months with more of whatever the weight column measures count
+  more toward the estimated impact, rather than every state-month
+  counting equally. Rows with a non-positive weight are dropped (WLS
+  requires positive weights, and a month with zero recorded search
+  interest carries no information under this weighting anyway). This is
+  a different design from `fuzzy_rd.py`'s dose-response ratio: WLS
+  weighting still reports a level effect per event-time bin, just
+  reweighted toward higher-attention state-months, whereas the fuzzy-RD
+  estimate is the ratio of two jumps (impact per unit of search-interest
+  increase). Don't read too much precision into an exact weighted
+  coefficient value from a small, single-state sample like parking's --
+  `tests/test_analysis.py` confirms the weighting shifts the estimate in
+  the right *direction* on synthetic data with a known, engineered
+  weight-outcome relationship, but the project's own known rank-deficiency
+  quirk (below) makes exact recovery on small synthetic panels noisier
+  under WLS than under plain OLS.
 - All three are validated in `tests/test_analysis.py` against synthetic
   panels with a known, engineered jump, not just run against real data
   and eyeballed — including a check that pooling multiple events (landing
   in different calendar months) does let seasonality be identified where
-  a single event provably can't, and a check on the window-trimming math
-  itself using this project's actual event gaps.
+  a single event provably can't, a check on the window-trimming math
+  itself using this project's actual event gaps, and a check that
+  `--weight-col` shifts the estimate toward whichever states/months carry
+  more weight.
 - The actual estimates need the monthly Trends fetch to have reached each
   event's date — for events from late 2022 onward this means waiting for
   most of the ~1600-request monthly fetch to complete.
@@ -357,11 +383,15 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   negative coefficients on both sides of the launch date rather than a
   clean pre/post break — read as a smooth, unrelated dip-and-recovery
   partly produced by neighboring launches' own windows bleeding into each
-  other, not evidence of a launch effect. The individual-event
-  regressions are degenerate (see above) rather than merely noisy, and
-  the individual fuzzy-RD estimates have standard errors several times
-  larger than their point estimates — uninformative, not evidence of an
-  effect either way.
+  other, not evidence of a launch effect. Reweighting this same regression
+  by `ai_interest_index` (`--weight-col ai_interest_index`, so months with
+  more actual AI search attention count more) doesn't change the
+  conclusion either: every post-launch coefficient is still insignificant
+  (p>0.16), and the shape is the same smooth, symmetric dip on both sides
+  of the launch date. The individual-event regressions are degenerate
+  (see above) rather than merely noisy, and the individual fuzzy-RD
+  estimates have standard errors several times larger than their point
+  estimates — uninformative, not evidence of an effect either way.
 - **Texas small-claims filings/dispositions**: essentially a null in the
   pooled analysis too. `small_claims_filings` has one significant
   coefficient right at launch month (event_time=0: -463, p=0.021) but

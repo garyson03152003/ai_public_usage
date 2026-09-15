@@ -152,3 +152,74 @@ def test_stacked_event_study_recovers_jump_and_identifies_seasonality():
 
     pre = result[result["event_time"].between(-6, -2)]
     assert pre["coef"].mean() == pytest.approx(0.0, abs=0.5)
+
+
+def _weighted_synthetic_panel(events: list[Event], seed: int = 0) -> pd.DataFrame:
+    """Same 4-state/seasonal-confound structure as _stacked_synthetic_panel
+    (known to identify event-time coefficients correctly despite the
+    documented rank-deficiency quirk -- see stacked_event_study.py's
+    docstring), but two states get a big post-launch jump (10) and a
+    heavy weight (50), the other two get no jump and a light weight (1).
+    An unweighted average of the four states' own jumps (10, 10, 0, 0)
+    lands at 5.0; a 50:50:1:1-weighted average should land much closer
+    to 10, the heavy states' own jump."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+    state_jump = {"California": 10.0, "Texas": 10.0, "New York": 0.0, "Wyoming": 0.0}
+    state_weight = {"California": 50.0, "Texas": 50.0, "New York": 1.0, "Wyoming": 1.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            seasonal = 3.0 * np.sin(month / 12 * 2 * np.pi)
+            jump = 0.0
+            for event in events:
+                et = months_since(year, month, event)
+                if 0 <= et <= 6:
+                    jump = state_jump[state]
+            noise = rng.normal(0, 0.3)
+            rows.append(
+                {
+                    "state": state,
+                    "year": year,
+                    "month": month,
+                    "y": state_effect[state] + seasonal + jump + noise,
+                    "weight": state_weight[state],
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_stacked_event_study_weight_col_shifts_estimate_toward_heavier_rows():
+    events = _well_separated_events()
+    panel = _weighted_synthetic_panel(events)
+
+    unweighted = run_stacked_event_study(panel, events, "y", max_window=6)
+    weighted = run_stacked_event_study(panel, events, "y", max_window=6, weight_col="weight")
+
+    unweighted_post = unweighted[unweighted["event_time"].between(0, 6)]["coef"].mean()
+    weighted_post = weighted[weighted["event_time"].between(0, 6)]["coef"].mean()
+
+    # Unweighted: every state counts equally -> average of 10, 10, 0, 0.
+    assert unweighted_post == pytest.approx(5.0, abs=1.0)
+    # Weighted 50:50:1:1 toward the two jump=10 states -> much closer to
+    # 10 than to the unweighted 5.0 midpoint.
+    assert weighted_post == pytest.approx(10.0, abs=1.5)
+    assert weighted_post > unweighted_post + 2.0
+
+
+def test_stacked_event_study_weight_col_drops_non_positive_weights():
+    events = _well_separated_events()
+    panel = _weighted_synthetic_panel(events)
+    panel.loc[panel["state"].isin(["New York", "Wyoming"]), "weight"] = 0.0
+
+    # Should not raise, and should simply exclude the zero-weight rows,
+    # leaving an estimate dominated entirely by the two heavy (jump=10) states.
+    result = run_stacked_event_study(panel, events, "y", max_window=6, weight_col="weight")
+    post = result[result["event_time"].between(0, 6)]["coef"].mean()
+    assert post == pytest.approx(10.0, abs=1.5)

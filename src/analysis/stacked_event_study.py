@@ -48,9 +48,26 @@ adoption effects can outlast a few months. Read tight windows around
 closely-spaced launches with that caveat; pass --no-trim to see the
 (more contaminated) fixed-window version instead.
 
+Optional weighting (--weight-col): by default every state-month in the
+stacked sample counts equally toward the estimated impact. Passing e.g.
+--weight-col ai_interest_index switches to weighted least squares, so a
+state-month with more actual AI search attention counts more, and one
+with (near-)zero search interest counts for little or nothing. Rows with
+a non-positive weight are dropped rather than passed to WLS (which
+requires positive weights) -- a month with literally zero recorded search
+interest carries no information under this weighting scheme anyway, so
+dropping it is equivalent to giving it zero weight. This changes what the
+number means (a search-interest-weighted average effect, not a flat
+average over calendar time) and is a different design from
+fuzzy_rd.py's dose-response ratio -- WLS weighting still estimates a
+level effect per event-time bin, it just reweights which state-months
+that average leans on, whereas fuzzy_rd.py estimates the ratio of two
+jumps (impact per unit of search-interest increase).
+
 Usage:
     python -m src.analysis.stacked_event_study --outcome ai_interest_index
     python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --controls unemployment_rate --window 6
+    python -m src.analysis.stacked_event_study --outcome parking_appeal_records --window 6 --no-trim --weight-col ai_interest_index
 """
 
 from __future__ import annotations
@@ -124,11 +141,22 @@ def run_stacked_event_study(
     control_cols: list[str] | None = None,
     trim_to_neighbors: bool = True,
     reference_period: int = -1,
+    weight_col: str | None = None,
 ) -> pd.DataFrame:
     stacked = build_stacked_panel(panel, events, max_window, trim_to_neighbors)
     stacked = stacked.dropna(subset=[outcome_col, "state"])
     if control_cols:
         stacked = stacked.dropna(subset=control_cols)
+
+    if weight_col:
+        stacked = stacked.dropna(subset=[weight_col])
+        zero_or_negative = (stacked[weight_col] <= 0).sum()
+        if zero_or_negative:
+            print(
+                f"Note: dropping {zero_or_negative} row(s) with {weight_col} <= 0 -- WLS weights must be "
+                "positive, and a month with literally zero search interest carries no information under this weighting anyway."
+            )
+            stacked = stacked[stacked[weight_col] > 0]
 
     if stacked["event_time"].nunique() < 2:
         raise ValueError(f"Not enough distinct event_time periods across the stacked events for {outcome_col} -- is the panel populated?")
@@ -142,7 +170,14 @@ def run_stacked_event_study(
     if control_cols:
         formula += " + " + " + ".join(control_cols)
 
-    ols = smf.ols(formula, data=stacked)
+    if weight_col:
+        # WLS weighted by e.g. ai_interest_index: months/states with more
+        # AI search attention count more toward the estimated impact,
+        # instead of every state-month counting equally regardless of
+        # how much anyone was actually paying attention to AI at the time.
+        ols = smf.wls(formula, data=stacked, weights=stacked[weight_col])
+    else:
+        ols = smf.ols(formula, data=stacked)
     n_clusters = stacked["state"].nunique()
     if n_clusters < 2:
         # Cluster-robust SEs need >=2 clusters (the standard small-cluster
@@ -218,23 +253,36 @@ def main() -> None:
     parser.add_argument("--window", type=int, default=12, help="Max months before/after each event (default 12; trimmed near neighbors)")
     parser.add_argument("--controls", nargs="*", default=None, help="Extra control columns, e.g. unemployment_rate")
     parser.add_argument("--no-trim", action="store_true", help="Use the fixed window for every event instead of trimming near neighbors")
+    parser.add_argument(
+        "--weight-col",
+        default=None,
+        help="Run WLS instead of OLS, weighted by this column (e.g. ai_interest_index) -- state-months with more "
+        "of whatever this column measures count more toward the estimated impact.",
+    )
     parser.add_argument("--panel", type=Path, default=PANEL_PATH)
     args = parser.parse_args()
 
     panel = pd.read_csv(args.panel)
     events = [EVENTS_BY_KEY[k] for k in args.events] if args.events else list(EVENTS)
     result = run_stacked_event_study(
-        panel, events, args.outcome, max_window=args.window, control_cols=args.controls, trim_to_neighbors=not args.no_trim
+        panel,
+        events,
+        args.outcome,
+        max_window=args.window,
+        control_cols=args.controls,
+        trim_to_neighbors=not args.no_trim,
+        weight_col=args.weight_col,
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    csv_path = OUTPUT_DIR / f"stacked__{args.outcome}.csv"
+    suffix = f"__weighted_{args.weight_col}" if args.weight_col else ""
+    csv_path = OUTPUT_DIR / f"stacked__{args.outcome}{suffix}.csv"
     result.to_csv(csv_path, index=False)
     print(f"n_events={result.attrs.get('n_events')} n_obs={result.attrs.get('n_obs')} r_squared={result.attrs.get('r_squared'):.4f}")
     print(result.to_string(index=False))
     print(f"Wrote -> {csv_path}")
 
-    plot_stacked_event_study(result, events, args.outcome, OUTPUT_DIR / f"stacked__{args.outcome}.png")
+    plot_stacked_event_study(result, events, args.outcome, OUTPUT_DIR / f"stacked__{args.outcome}{suffix}.png")
 
 
 if __name__ == "__main__":
