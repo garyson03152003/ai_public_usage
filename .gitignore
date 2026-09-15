@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# This repo commits a snapshot of fetched/derived data (see README) so the
+# combined dataset is usable without a live network. Re-run the fetch_*.py
+# scripts to refresh it. The exceptions below are either regenerated
+# pass-through dumps too large to be worth versioning, or sources that
+# turned out to have no working automated path (see README/sources.yaml).
+/data/raw/unemployment/ar9050_raw.csv
+/data/raw/court_stats/**
+/data/raw/controls/**
+!/data/raw/court_stats/.gitkeep
+!/data/raw/controls/.gitkeep
+# tx_justice_court_civil_month.csv and wa_small_claims_month.csv ARE
+# committed (see below) -- unlike the rest of court_stats/, these two have
+# real, working automated fetchers (fetch_tx_card.py, fetch_wa_caseload.py),
+# so they're actual fetched data worth snapshotting, not a placeholder for
+# a manual-export path that never got used.
+!/data/raw/court_stats/tx_justice_court_civil_month.csv
+!/data/raw/court_stats/wa_small_claims_month.csv

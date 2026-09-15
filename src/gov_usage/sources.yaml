@@ -1,0 +1,70 @@
+# City/state open-data (Socrata "SODA API") sources for parking-ticket
+# appeal / hearing data, consumed by fetch_socrata.py.
+#
+# Each entry:
+#   name:          human-readable label
+#   domain:        Socrata site domain, e.g. data.cityofnewyork.us
+#   dataset_id:    the 4x4 dataset identifier (from the dataset's URL)
+#   state:         the state this city/agency sits in (for roll-up)
+#   date_field:    text column holding the ticket's issue date, format MM/DD/YYYY
+#                  (these portals store it as plain text, not a real date type,
+#                  so year filtering uses a "...like '%/<year>'" suffix match)
+#   status_field:  column whose value says how the ticket was resolved
+#   status_filter: substrings of status_field to keep (case-insensitive OR)
+#   notes:         what the dataset actually contains / caveats
+#
+# Verified against the live Socrata API (see README):
+#   - NYC "Open Parking and Camera Violations" (nc67-uf89) has a
+#     `violation_status` column with real hearing/appeal outcomes:
+#     HEARING HELD-GUILTY/NOT GUILTY/GUILTY REDUCTION, HEARING ADJOURNMENT,
+#     HEARING PENDING, HEARING HELD-REINSTATEMENT, APPEAL AFFIRMED/REVERSED/
+#     ABANDONED/MODIFIED. This is NYC's actual parking-ticket appeal data,
+#     not just a generic administrative-hearings dataset.
+#   - The table is large (hundreds of millions of rows) and issue_date is
+#     plain text, so aggregating by year server-side (see fetch_socrata.py)
+#     takes on the order of a couple of minutes per year without a Socrata
+#     app token; get a free one from the portal's developer settings and
+#     pass it via --app-token to speed this up.
+#
+# ---------------------------------------------------------------------------
+# Coverage research: the largest city in every other state was checked
+# (largest-city open-data portal, live API queries, not just search
+# snippets) for a Socrata dataset with a genuine hearing/appeal-outcome
+# field like NYC's. None qualified. Findings, so this isn't silently
+# abandoned as an unexplained TODO:
+#   - Most cities either have no open-data portal at all (e.g. Jacksonville,
+#     Fargo, Cheyenne, West Virginia's cities), or run Esri ArcGIS Hub or
+#     CKAN instead of Socrata (Atlanta, Denver, DC, Boston, Chicago's
+#     administrative-hearings side, Nashville, Salt Lake City, Milwaukee,
+#     and many more) -- a different platform/API this project doesn't
+#     currently ingest.
+#   - A handful ARE genuine, live Socrata portals with a parking-citation
+#     dataset (LA, New Orleans, Kansas City, Richmond VA, Seattle, Dallas,
+#     Austin, Providence) but every one of those datasets only has
+#     issuance/payment fields (ticket number, date, fine, paid/unpaid) --
+#     no hearing- or appeal-outcome field the way NYC's does.
+#   - Philadelphia's parking-violations data (via CARTO/OpenDataPhilly,
+#     not Socrata) is real and live but is also issuance-only.
+#   - Chicago's well-known ProPublica parking-ticket-with-hearing-outcome
+#     analysis was built from a FOIA request, not the public SODA API --
+#     data.cityofchicago.org has no equivalent dataset to pull from.
+# So as of this research pass, NYC is the only state/city in this project
+# with a scriptable, genuinely appeal-resolved parking-ticket data source.
+# If you find a new one (or add support for ArcGIS/CKAN portals), add it
+# below following the NYC entry's shape.
+# ---------------------------------------------------------------------------
+
+sources:
+  - name: NYC Open Parking and Camera Violations
+    domain: data.cityofnewyork.us
+    dataset_id: nc67-uf89
+    state: New York
+    date_field: issue_date
+    status_field: violation_status
+    status_filter: ["APPEAL", "HEARING"]
+    enabled: true
+    notes: >
+      Ticket-level parking/camera violations with a violation_status field
+      that records hearing and appeal outcomes. NYC-specific, not
+      statewide. fetch_socrata.py aggregates this to yearly counts per
+      status rather than downloading raw rows.

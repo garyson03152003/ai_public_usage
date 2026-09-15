@@ -1,0 +1,12 @@
+pandas>=2.0
+pytrends>=4.9
+requests>=2.31
+sodapy>=2.2
+PyYAML>=6.0
+pytest>=7.4
+statsmodels>=0.14
+matplotlib>=3.7
+numpy>=1.24
+xlrd>=2.0.1
+openpyxl>=3.1
+pymupdf>=1.24
