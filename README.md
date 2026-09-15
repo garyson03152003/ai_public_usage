@@ -42,6 +42,7 @@ src/
   gov_usage/
     fetch_court_stats.py     # data.gov CKAN attempt + manual-export normalizer for court caseload data
     fetch_tx_card.py         # Texas Court Activity Reporting Database: genuine MONTHLY small-claims data
+    fetch_wa_caseload.py     # WA Courts of Limited Jurisdiction "Small Claims Cases" report: also MONTHLY
     fetch_socrata.py         # Socrata (SODA API) fetcher, aggregated per year, for city portals
     fetch_unemployment.py    # DOL ETA 9050: UI first-payment processing time, by state x year
     fetch_bls_controls.py    # BLS LAUS: state unemployment rate, the control variable for the above
@@ -85,7 +86,8 @@ python -m src.combine_trends_monthly   # -> data/processed/trends_state_month.cs
 
 # 2. Government usage data
 python -m src.gov_usage.fetch_court_stats          # best-effort data.gov download attempt, see caveat below
-python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-08   # Texas MONTHLY small-claims data, see below
+python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-08        # Texas MONTHLY small-claims data, see below
+python -m src.gov_usage.fetch_wa_caseload --start 2020-01 --end 2026-07    # Washington MONTHLY small-claims data, see below
 python -m src.gov_usage.fetch_socrata              # pulls city portals enabled in sources.yaml, 2020-present
 python -m src.gov_usage.fetch_unemployment         # DOL ETA 9050, all states, 2020-present
 python -m src.gov_usage.fetch_bls_controls         # BLS state unemployment rate (the control variable)
@@ -135,30 +137,66 @@ and normalize them with that function — see the docstring in
   for the full trail. Once normalized, `combine.py` keeps every (state,
   year) row rather than collapsing to a single snapshot.
 
-  **Texas is the exception, and the only source in this project with
-  genuine MONTHLY small-claims resolution.** The Texas Office of Court
-  Administration runs its own query tool, the Court Activity Reporting
-  Database (`card.txcourts.gov`), with an explicit from/to month+year
-  picker for its "Justice Court Activity Detail" report — confirmed live
-  by driving the tool's classic ASP.NET WebForms postback sequence with
-  plain `requests` (no browser needed) and checking that the returned
-  figures actually change per month requested (e.g. January 2020 alone
-  returns different, internally consistent numbers from the full 2020
-  calendar year). `fetch_tx_card.py` automates this end to end: one
-  session setup, then one request per month, statewide, parsing the
-  returned Crystal-Reports `.xls` export's "CIVIL CASES" section for
-  filings ("New Cases Filed") and dispositions ("Total Cases Disposed")
-  across Debt Claim / Landlord-Tenant / Small Claims. Coverage: Texas
-  only, 9/2013-present (the "HB79" reporting period), and each month's
-  export reports its own reporting-completeness rate (typically >90%,
-  self-reported by county courts to OCA) which isn't captured per-row
-  here — see the module docstring for the full postback trail, including
-  the wrong-URL 500 error hit and fixed along the way. `build_panel.py`
-  pulls this into the monthly analysis panel as `small_claims_filings`/
-  `small_claims_dispositions` (Texas-only, same single-state caveat as
-  the NYC parking columns below); `combine.py` rolls it up to annual and
-  merges it into the same `small_claims_filings` column the NCSC
-  manual-export path would otherwise populate, so either source works.
+  **Texas and Washington are the exceptions: the two sources in this
+  project with genuine MONTHLY small-claims resolution.** The Texas
+  Office of Court Administration runs its own query tool, the Court
+  Activity Reporting Database (`card.txcourts.gov`), with an explicit
+  from/to month+year picker for its "Justice Court Activity Detail"
+  report — confirmed live by driving the tool's classic ASP.NET WebForms
+  postback sequence with plain `requests` (no browser needed) and
+  checking that the returned figures actually change per month requested
+  (e.g. January 2020 alone returns different, internally consistent
+  numbers from the full 2020 calendar year). `fetch_tx_card.py` automates
+  this end to end: one session setup, then one request per month,
+  statewide, parsing the returned Crystal-Reports `.xls` export's "CIVIL
+  CASES" section for filings ("New Cases Filed") and dispositions ("Total
+  Cases Disposed") across Debt Claim / Landlord-Tenant / Small Claims.
+  Coverage: Texas only, 9/2013-present (the "HB79" reporting period), and
+  each month's export reports its own reporting-completeness rate
+  (typically >90%, self-reported by county courts to OCA) which isn't
+  captured per-row here — see the module docstring for the full postback
+  trail, including the wrong-URL 500 error hit and fixed along the way.
+
+  Washington's Administrative Office of the Courts publishes a "Small
+  Claims Cases" report as its own named, monthly, statewide item (not
+  folded into a broader civil category) at
+  `courts.wa.gov/caseload/?fa=caseload.showIndex&level=d&freq=m` — found
+  during a 50-state search for a second source (see below). Every past
+  month is separately archived at a predictably-named URL
+  (`/caseload/content/archive/clj/Monthly/<year>/<Mon><year>Mon.pdf`,
+  e.g. `Jul2026Mon.pdf`), confirmed going back to 2000, no query string or
+  session needed. `fetch_wa_caseload.py` downloads each month's ~180-page
+  combined report PDF and extracts the "Small Claims Cases" section's
+  "State Total" row (filings + dispositions) with PyMuPDF, using
+  `page.get_text(sort=True)` specifically -- without it, PyMuPDF's default
+  reading order badly interleaves this report's multi-column table
+  (confirmed by trying both ways on the same page) -- and a section-title
+  regex tight enough to skip the table of contents' "Small Claims Cases -
+  Proceedings Detailed Report" line, which superficially matches too
+  loose a check (hit and fixed live). The most recent month or two isn't
+  archived yet (detected via the real-PDF-vs-HTML-redirect magic-byte
+  check, not assumed). Both sources feed the same
+  `small_claims_filings`/`small_claims_dispositions` columns in
+  `build_panel.py` (each state's own rows, so they combine rather than
+  compete) and the same annual `combine.py` rollup, alongside the NCSC
+  manual-export path for any other state.
+
+  **The rest of the 50 states were checked too, live, and don't have
+  anything comparable.** No other state has Texas's or Washington's kind
+  of scriptable, parameterized, or predictably-URLed monthly query tool.
+  Virginia looked like the strongest remaining lead (a genuinely monthly,
+  statewide, per-locality General District Court filings report, updated
+  through the current month) but was ruled out on inspection: its case
+  categories don't isolate "Small Claims" as its own line, folding it
+  into "General Civil & Civil Commitments" instead (checked the report
+  itself and its Quick Reference Guide's case-type definitions). North
+  Carolina has a real open-data catalog (`data.nccourts.gov`) but sits
+  behind the same Cloudflare JS challenge already hit and correctly not
+  worked around elsewhere in this project (re-checked live, still
+  blocked, not transient). A handful of other states (Arizona, Kentucky,
+  Minnesota, Nevada, Georgia) have real dashboards, but on Tableau/Power
+  BI infrastructure with the same WebSocket-session wall as NCSC's. Most
+  states have nothing beyond annual PDF reports.
 - **Parking ticket appeals** — there is no national dataset. This repo
   ships one verified source: NYC's "Open Parking and Camera Violations"
   (Socrata dataset `nc67-uf89` on `data.cityofnewyork.us`), which has a
@@ -219,10 +257,12 @@ coincide with a shift in a usage metric, right around that date? This
 needs monthly resolution, which rules out most court-stats data (annual
 only) -- AI search interest, UI first-payment processing time, NYC
 parking-ticket hearing/appeal volume (`fetch_socrata.py --granularity
-month`), and now Texas small-claims filings/dispositions
-(`fetch_tx_card.py`) are all available monthly, so those are the outcomes
-this analysis can use (parking is NYC-only and small-claims is Texas-only,
-same single-state caveat as the annual versions).
+month`), and now Texas and Washington small-claims filings/dispositions
+(`fetch_tx_card.py`, `fetch_wa_caseload.py`) are all available monthly, so
+those are the outcomes this analysis can use (parking is NYC-only, same
+single-state caveat as the annual versions; small-claims is now two
+states, Texas and Washington, each analyzed on its own since they're
+still separate single-state samples, not a pooled multi-state one).
 
 ```bash
 # Needs the monthly Trends fetch (see above), fetch_unemployment.py (which
@@ -468,25 +508,26 @@ python -m src.analysis.stacked_event_study --outcome ui_pct_within_21_days --con
   ChatGPT's own LATE SE alone is ~11,700 — pooling brings the typical
   case down to ~1053, real progress, just not enough to rescue a ratio
   whose denominator is this close to zero).
-- **Texas small-claims filings/dispositions**: essentially a null in the
-  pooled analysis too. `small_claims_filings` has one significant
-  coefficient right at launch month (event_time=0: -463, p=0.021) but
-  every other post-launch bin (months 1-5) is insignificant with mixed
-  signs, and the pre-period includes an even larger significant swing at
-  event_time=-6 (+1345, p<0.001) driven by ordinary month-to-month filing
-  volume differences rather than anything launch-related — with 12
-  event-time bins tested, one being "significant" in isolation isn't
-  strong evidence by itself. `small_claims_dispositions` shows the same
-  pattern (only event_time=+4 significant, p=0.022, surrounded by
-  insignificant neighbors). Individual-event fuzzy-RD checks (single
-  state, single event) are far too noisy to read on their own -- e.g.
-  chatgpt_launch's small_claims_filings LATE has a standard error ~6x its
-  point estimate.
+- **Small-claims filings/dispositions (Texas + Washington)**: also a null
+  in the pooled analysis, and now a genuinely 2-state pooled sample (once
+  Washington's data was added, `stacked_event_study.py` automatically
+  switched from the single-state HC1 fallback to real state-clustered
+  SEs, since `state.nunique() >= 2` — no code change needed, just more
+  data). `small_claims_filings` has exactly one nominally significant bin
+  out of 12 tested (event_time=2: -31, p=0.039, a small effect relative
+  to the series' own scale), with every other post-launch bin (0, 1, 3,
+  4, 5) insignificant — one hit out of 12 bins tested is exactly what
+  multiple-testing noise looks like, not a pattern. `small_claims_dispositions`
+  is cleaner still: every single event-time bin, pre- and post-launch, is
+  insignificant (all p>0.2). Individual-event fuzzy-RD checks remain too
+  noisy to read on their own even pooling both states now -- e.g.
+  chatgpt_launch's small_claims_filings LATE has a standard error ~4.6x
+  its point estimate (157.98 vs. SE 729.66).
 - Bottom line: strong evidence AI launches move search interest; no
   credible evidence, in any of the three government-usage outcomes
-  tested (UI processing time, NYC parking appeals, Texas small-claims
-  filings/dispositions), that they shift how fast or how much these
-  public services get used or processed.
+  tested (UI processing time, NYC parking appeals, Texas + Washington
+  small-claims filings/dispositions), that they shift how fast or how
+  much these public services get used or processed.
 
 Caveat on this run specifically: BLS's anonymous LAUS API quota (25
 queries/day, shared per source IP) was already exhausted when re-running

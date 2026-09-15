@@ -2,16 +2,15 @@
 and fuzzy-RD scripts: AI search interest (from the monthly Trends fetch)
 joined with this project's monthly-resolution government-usage metrics --
 UI first-payment processing time (all states), NYC parking-ticket
-hearing/appeal volume (New York only), and Texas small-claims (Justice
-Court) filings/dispositions (Texas only) -- plus the UI control (state
-unemployment rate).
+hearing/appeal volume (New York only), and small-claims filings/
+dispositions for Texas (via `fetch_tx_card.py`) and Washington (via
+`fetch_wa_caseload.py`) -- plus the UI control (state unemployment rate).
 
 This is a distinct, narrower panel from combine.py's annual
 combined_state_data.csv -- it exists because event-time analysis around
 specific launch dates needs monthly resolution, which most court-stats
-sources don't have (see the main README), but parking-ticket data (via
-`fetch_socrata.py --granularity month`) and Texas's small-claims data (via
-`fetch_tx_card.py`) now do.
+sources don't have (see the main README), but parking-ticket data and
+the two small-claims sources now do.
 
 Usage:
     python -m src.analysis.build_panel
@@ -31,6 +30,7 @@ UI_MONTHLY_PATH = ROOT / "data" / "raw" / "unemployment" / "eta9050_state_month.
 CONTROLS_MONTHLY_PATH = ROOT / "data" / "raw" / "controls" / "bls_unemployment_rate_monthly.csv"
 PARKING_MONTHLY_DIR = ROOT / "data" / "raw" / "parking_tickets_monthly"
 TX_CARD_PATH = ROOT / "data" / "raw" / "court_stats" / "tx_justice_court_civil_month.csv"
+WA_CASELOAD_PATH = ROOT / "data" / "raw" / "court_stats" / "wa_small_claims_month.csv"
 OUTPUT_PATH = ROOT / "data" / "processed" / "analysis_panel_state_month.csv"
 
 ALL_STATES = pd.DataFrame({"state": list(US_STATE_TO_ABBR.keys())})
@@ -97,19 +97,39 @@ def load_tx_small_claims_monthly(path: Path = TX_CARD_PATH) -> pd.DataFrame:
     return small_claims[columns]
 
 
+def load_wa_small_claims_monthly(path: Path = WA_CASELOAD_PATH) -> pd.DataFrame:
+    """Read fetch_wa_caseload.py output, already state-level statewide
+    small-claims filings/dispositions. Washington-only, same single-state
+    caveat as the Texas and NYC parking columns; shares the same
+    small_claims_filings/small_claims_dispositions columns as
+    load_tx_small_claims_monthly() since the two sources cover disjoint
+    states (Texas, Washington) and combine cleanly by concatenation."""
+    columns = ["state", "year", "month", "small_claims_filings", "small_claims_dispositions"]
+    if not path.exists():
+        return pd.DataFrame(columns=columns)
+    df = pd.read_csv(path)
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+    return df.rename(columns={"filings": "small_claims_filings", "dispositions": "small_claims_dispositions"})[columns]
+
+
 def build(
     trends_path: Path = TRENDS_MONTHLY_PANEL,
     ui_path: Path = UI_MONTHLY_PATH,
     controls_path: Path = CONTROLS_MONTHLY_PATH,
     parking_dir: Path = PARKING_MONTHLY_DIR,
     tx_card_path: Path = TX_CARD_PATH,
+    wa_caseload_path: Path = WA_CASELOAD_PATH,
     output_path: Path = OUTPUT_PATH,
 ) -> pd.DataFrame:
     trends = load_trends_monthly(trends_path)
     ui = load_ui_monthly(ui_path)
     controls = load_controls_monthly(controls_path)
     parking = load_parking_monthly(parking_dir)
-    tx_small_claims = load_tx_small_claims_monthly(tx_card_path)
+    small_claims = pd.concat(
+        [load_tx_small_claims_monthly(tx_card_path), load_wa_small_claims_monthly(wa_caseload_path)],
+        ignore_index=True,
+    )
 
     if trends.empty:
         raise FileNotFoundError(
@@ -126,7 +146,7 @@ def build(
         .merge(ui, on=["state", "year", "month"], how="left")
         .merge(controls, on=["state", "year", "month"], how="left")
         .merge(parking, on=["state", "year", "month"], how="left")
-        .merge(tx_small_claims, on=["state", "year", "month"], how="left")
+        .merge(small_claims, on=["state", "year", "month"], how="left")
     )
     panel.insert(1, "state_abbr", panel["state"].map(US_STATE_TO_ABBR))
     panel = panel.sort_values(["state", "year", "month"]).reset_index(drop=True)

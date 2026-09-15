@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.combine import combine, load_tx_small_claims_annual
+from src.combine import combine, load_tx_small_claims_annual, load_wa_small_claims_annual
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
@@ -14,6 +14,7 @@ def test_combine_builds_state_year_panel(tmp_path):
         trends_dir=FIXTURES / "trends",
         court_stats_dir=FIXTURES / "court_stats",
         tx_card_path=tmp_path / "no_tx_data_here.csv",
+        wa_caseload_path=tmp_path / "no_wa_data_here.csv",
         parking_dir=FIXTURES / "parking_tickets",
         unemployment_dir=FIXTURES / "unemployment",
         controls_dir=FIXTURES / "controls",
@@ -76,6 +77,7 @@ def test_combine_merges_tx_small_claims_into_court_stats(tmp_path):
         trends_dir=FIXTURES / "trends",
         court_stats_dir=FIXTURES / "court_stats",
         tx_card_path=FIXTURES / "court_stats" / "tx_justice_court_civil_month.csv",
+        wa_caseload_path=tmp_path / "no_wa_data_here.csv",
         parking_dir=FIXTURES / "parking_tickets",
         unemployment_dir=FIXTURES / "unemployment",
         controls_dir=FIXTURES / "controls",
@@ -90,6 +92,52 @@ def test_combine_merges_tx_small_claims_into_court_stats(tmp_path):
     assert texas_2022["data_coverage_notes"] == "no-trends,court-stats,no-parking,no-unemployment,no-controls"
 
 
+def test_combine_merges_wa_small_claims_into_court_stats(tmp_path):
+    output_path = tmp_path / "combined_state_data.csv"
+
+    combined = combine(
+        trends_dir=FIXTURES / "trends",
+        court_stats_dir=FIXTURES / "court_stats",
+        tx_card_path=tmp_path / "no_tx_data_here.csv",
+        wa_caseload_path=FIXTURES / "court_stats" / "wa_small_claims_month.csv",
+        parking_dir=FIXTURES / "parking_tickets",
+        unemployment_dir=FIXTURES / "unemployment",
+        controls_dir=FIXTURES / "controls",
+        output_path=output_path,
+        start_year=2026,
+        end_year=2026,
+    )
+
+    washington_2026 = combined.set_index(["state", "year"]).loc[("Washington", 2026)]
+    # Fixture has Jun + Jul 2026 filings 497 + 469 = 966.
+    assert washington_2026["small_claims_filings"] == 966
+    assert washington_2026["data_coverage_notes"] == "no-trends,court-stats,no-parking,no-unemployment,no-controls"
+
+
+def test_combine_merges_both_tx_and_wa_small_claims(tmp_path):
+    """TX and WA cover disjoint states, so both sources' rows should
+    survive in the same small_claims_filings column without clobbering
+    each other."""
+    output_path = tmp_path / "combined_state_data.csv"
+
+    combined = combine(
+        trends_dir=FIXTURES / "trends",
+        court_stats_dir=FIXTURES / "court_stats",
+        tx_card_path=FIXTURES / "court_stats" / "tx_justice_court_civil_month.csv",
+        wa_caseload_path=FIXTURES / "court_stats" / "wa_small_claims_month.csv",
+        parking_dir=FIXTURES / "parking_tickets",
+        unemployment_dir=FIXTURES / "unemployment",
+        controls_dir=FIXTURES / "controls",
+        output_path=output_path,
+        start_year=2022,
+        end_year=2026,
+    )
+
+    by_state_year = combined.set_index(["state", "year"])
+    assert by_state_year.loc[("Texas", 2022), "small_claims_filings"] == 11000
+    assert by_state_year.loc[("Washington", 2026), "small_claims_filings"] == 966
+
+
 def test_load_tx_small_claims_annual_rolls_up_months():
     result = load_tx_small_claims_annual(FIXTURES / "court_stats" / "tx_justice_court_civil_month.csv")
     assert len(result) == 1
@@ -98,6 +146,21 @@ def test_load_tx_small_claims_annual_rolls_up_months():
     assert row["year"] == 2022
     assert row["small_claims_filings"] == 11000
     assert row["small_claims_dispositions"] == 10500
+
+
+def test_load_wa_small_claims_annual_rolls_up_months():
+    result = load_wa_small_claims_annual(FIXTURES / "court_stats" / "wa_small_claims_month.csv")
+    assert len(result) == 1
+    row = result.iloc[0]
+    assert row["state"] == "Washington"
+    assert row["year"] == 2026
+    assert row["small_claims_filings"] == 966
+    assert row["small_claims_dispositions"] == 699
+
+
+def test_load_wa_small_claims_annual_missing_file_returns_empty():
+    result = load_wa_small_claims_annual(Path("/nonexistent/path.csv"))
+    assert result.empty
 
 
 def test_load_tx_small_claims_annual_missing_file_returns_empty():

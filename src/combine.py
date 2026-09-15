@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TRENDS_DIR = ROOT / "data" / "raw" / "trends"
 COURT_STATS_DIR = ROOT / "data" / "raw" / "court_stats"
 TX_CARD_MONTHLY_PATH = COURT_STATS_DIR / "tx_justice_court_civil_month.csv"
+WA_CASELOAD_MONTHLY_PATH = COURT_STATS_DIR / "wa_small_claims_month.csv"
 PARKING_DIR = ROOT / "data" / "raw" / "parking_tickets"
 UNEMPLOYMENT_DIR = ROOT / "data" / "raw" / "unemployment"
 CONTROLS_DIR = ROOT / "data" / "raw" / "controls"
@@ -119,13 +120,12 @@ def load_court_stats(court_stats_dir: Path = COURT_STATS_DIR) -> pd.DataFrame:
 
 
 def load_tx_small_claims_annual(tx_card_path: Path = TX_CARD_MONTHLY_PATH) -> pd.DataFrame:
-    """Roll up fetch_tx_card.py's monthly Texas small-claims data (the one
-    source in this project with genuine month-level resolution -- see that
-    module's docstring) to one row per year, in the same
-    small_claims_filings column load_court_stats produces, so the two
-    sources combine rather than compete. avg_processing_days isn't
-    available from this source (only filing/disposition counts), so it's
-    left NaN here."""
+    """Roll up fetch_tx_card.py's monthly Texas small-claims data (one of
+    two sources in this project with genuine month-level resolution -- see
+    that module's docstring) to one row per year, in the same
+    small_claims_filings column load_court_stats produces, so the sources
+    combine rather than compete. avg_processing_days isn't available from
+    this source (only filing/disposition counts), so it's left NaN here."""
     if not tx_card_path.exists():
         return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
     df = pd.read_csv(tx_card_path)
@@ -136,6 +136,44 @@ def load_tx_small_claims_annual(tx_card_path: Path = TX_CARD_MONTHLY_PATH) -> pd
         small_claims_filings=("filings", "sum"),
         small_claims_dispositions=("dispositions", "sum"),
     )
+
+
+def load_wa_small_claims_annual(wa_caseload_path: Path = WA_CASELOAD_MONTHLY_PATH) -> pd.DataFrame:
+    """Roll up fetch_wa_caseload.py's monthly Washington small-claims data
+    (the second source with genuine month-level resolution, found via a
+    broader 50-state search after Texas) to one row per year, same
+    small_claims_filings/small_claims_dispositions columns as the Texas
+    rollup above."""
+    if not wa_caseload_path.exists():
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    df = pd.read_csv(wa_caseload_path)
+    if df.empty:
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    return df.groupby(["state", "year"], as_index=False).agg(
+        small_claims_filings=("filings", "sum"),
+        small_claims_dispositions=("dispositions", "sum"),
+    )
+
+
+def _merge_small_claims_source(court_stats: pd.DataFrame, source: pd.DataFrame) -> pd.DataFrame:
+    """Fold an automated monthly-source annual rollup (Texas, Washington,
+    ...) into court_stats' small_claims_filings column, filling gaps
+    rather than overwriting -- each source covers different states, so
+    this combines cleanly rather than competing."""
+    if source.empty:
+        return court_stats
+    if court_stats.empty:
+        return source
+    merged = court_stats.merge(source, on=["state", "year"], how="outer", suffixes=("", "_src"))
+    # pandas only appends "_src" to columns that actually overlap between
+    # the two frames (e.g. small_claims_dispositions on a second call,
+    # once an earlier source already added it) -- a column unique to
+    # `source` merges in under its own plain name with no suffix at all.
+    for col in ("small_claims_filings", "small_claims_dispositions"):
+        if f"{col}_src" in merged.columns:
+            merged[col] = merged[col].fillna(merged[f"{col}_src"])
+            merged = merged.drop(columns=[f"{col}_src"])
+    return merged
 
 
 def load_parking_tickets(parking_dir: Path = PARKING_DIR) -> pd.DataFrame:
@@ -200,6 +238,7 @@ def combine(
     trends_dir: Path = TRENDS_DIR,
     court_stats_dir: Path = COURT_STATS_DIR,
     tx_card_path: Path = TX_CARD_MONTHLY_PATH,
+    wa_caseload_path: Path = WA_CASELOAD_MONTHLY_PATH,
     parking_dir: Path = PARKING_DIR,
     unemployment_dir: Path = UNEMPLOYMENT_DIR,
     controls_dir: Path = CONTROLS_DIR,
@@ -211,16 +250,8 @@ def combine(
 
     trends = load_trends(trends_dir)
     court_stats = load_court_stats(court_stats_dir)
-    tx_small_claims = load_tx_small_claims_annual(tx_card_path)
-    if not tx_small_claims.empty:
-        court_stats = (
-            court_stats.merge(tx_small_claims, on=["state", "year"], how="outer", suffixes=("", "_tx"))
-            if not court_stats.empty
-            else tx_small_claims
-        )
-        if "small_claims_filings_tx" in court_stats.columns:
-            court_stats["small_claims_filings"] = court_stats["small_claims_filings"].fillna(court_stats["small_claims_filings_tx"])
-            court_stats = court_stats.drop(columns=["small_claims_filings_tx"])
+    court_stats = _merge_small_claims_source(court_stats, load_tx_small_claims_annual(tx_card_path))
+    court_stats = _merge_small_claims_source(court_stats, load_wa_small_claims_annual(wa_caseload_path))
     parking = load_parking_tickets(parking_dir)
     unemployment = load_unemployment(unemployment_dir)
     controls = load_controls(controls_dir)
