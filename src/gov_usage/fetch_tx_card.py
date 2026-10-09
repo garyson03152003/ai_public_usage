@@ -65,8 +65,14 @@ Disposed" (dispositions) rows, among others. This module parses those two
 rows by label rather than by fixed row/column index, since blank
 formatting rows shift slightly in different exports.
 
+A month that hasn't been reported yet (the current/a future month) comes
+back as a well-formed report with every figure zeroed out, rather than an
+error -- confirmed live, not assumed. A real statewide month is never
+actually zero, so fetch_range() treats an all-zero response as "not
+available yet" and skips it instead of writing a misleading zero row.
+
 Usage:
-    python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-08
+    python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-09
 """
 
 from __future__ import annotations
@@ -343,8 +349,19 @@ def fetch_range(
         try:
             xls_bytes = fetch_month_xls(card, y, m)
             frame = parse_civil_case_activity(xls_bytes, y, m)
-            new_frames.append(frame)
-            print(f"  {y}-{m:02d}: OK ({frame['filings'].sum()} total civil filings)")
+            total = frame["filings"].sum()
+            if total == 0:
+                # CARD returns a well-formed report with every figure
+                # zeroed out for a month that hasn't been reported yet
+                # (confirmed live: a current/future month gives this
+                # instead of an error), rather than failing outright --
+                # a real statewide month is never actually zero, so treat
+                # this as "not available yet" and skip it rather than
+                # writing a misleading zero row.
+                print(f"  {y}-{m:02d}: SKIPPED (all-zero response -- not reported yet)")
+            else:
+                new_frames.append(frame)
+                print(f"  {y}-{m:02d}: OK ({total} total civil filings)")
         except Exception as exc:
             print(f"  {y}-{m:02d}: FAILED -- {exc}")
         if i < len(months) - 1:

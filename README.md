@@ -86,8 +86,8 @@ python -m src.combine_trends_monthly   # -> data/processed/trends_state_month.cs
 
 # 2. Government usage data
 python -m src.gov_usage.fetch_court_stats          # best-effort data.gov download attempt, see caveat below
-python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-08        # Texas MONTHLY small-claims data, see below
-python -m src.gov_usage.fetch_wa_caseload --start 2020-01 --end 2026-07    # Washington MONTHLY small-claims data, see below
+python -m src.gov_usage.fetch_tx_card --start 2020-01 --end 2026-09        # Texas MONTHLY small-claims data, see below
+python -m src.gov_usage.fetch_wa_caseload --start 2020-01 --end 2026-08    # Washington MONTHLY small-claims data, see below
 python -m src.gov_usage.fetch_socrata              # pulls city portals enabled in sources.yaml, 2020-present
 python -m src.gov_usage.fetch_unemployment         # DOL ETA 9050, all states, 2020-present
 python -m src.gov_usage.fetch_bls_controls         # BLS state unemployment rate (the control variable)
