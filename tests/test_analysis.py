@@ -1,0 +1,357 @@
+import datetime
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from src.analysis.events import EVENTS, EVENTS_BY_KEY, Event, months_since
+from src.analysis.event_study import run_event_study
+from src.analysis.fuzzy_rd import fuzzy_rd
+from src.analysis.stacked_event_study import compute_event_impact_weights, event_time_bounds, run_stacked_event_study
+from src.analysis.stacked_fuzzy_rd import stacked_fuzzy_rd
+
+EVENT = EVENTS_BY_KEY["chatgpt_launch"]  # 2022-11-30
+
+
+def test_months_since():
+    assert months_since(2022, 11, EVENT) == 0
+    assert months_since(2022, 10, EVENT) == -1
+    assert months_since(2022, 12, EVENT) == 1
+    assert months_since(2023, 11, EVENT) == 12
+    assert months_since(2021, 11, EVENT) == -12
+
+
+def _synthetic_panel(true_jump: float, seed: int = 0, n_months: int = 24) -> pd.DataFrame:
+    """States with different fixed effects, a smooth linear drift in
+    event_time (which a local-linear/event-time-dummy model should fully
+    absorb, isolating the jump), and a deterministic jump of `true_jump`
+    at event_time >= 0, plus small noise. Deliberately no seasonal/curved
+    confound here -- that would bias a *local-linear* estimator by
+    construction (finite-bandwidth bias), which is a property of the
+    method, not something this test is meant to probe."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    periods = pd.period_range("2022-01", periods=n_months, freq="M")
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            event_time = months_since(year, month, EVENT)
+            trend = 0.1 * event_time
+            jump = true_jump if event_time >= 0 else 0.0
+            noise = rng.normal(0, 0.5)
+            rows.append(
+                {
+                    "state": state,
+                    "year": year,
+                    "month": month,
+                    "y": state_effect[state] + trend + jump + noise,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_event_study_recovers_known_jump():
+    panel = _synthetic_panel(true_jump=7.0)
+    result = run_event_study(panel, EVENT, "y", window=10)
+
+    post_launch = result[result["event_time"].between(0, 8)]
+    assert post_launch["coef"].mean() == pytest.approx(7.0, abs=0.6)
+
+    pre_launch = result[result["event_time"].between(-8, -2)]
+    assert pre_launch["coef"].mean() == pytest.approx(0.0, abs=0.6)
+
+
+def test_event_study_handles_single_state_outcome():
+    """A regression test: NYC's parking-appeal outcome only has data for
+    one state, which made cluster-robust SEs divide by zero (n_clusters -
+    1 = 0) the first time this ran against real data. Should fall back to
+    HC1 robust SEs instead of crashing."""
+    panel = _synthetic_panel(true_jump=5.0)
+    single_state_panel = panel[panel["state"] == "California"]
+
+    result = run_event_study(single_state_panel, EVENT, "y", window=6)
+    post = result[result["event_time"].between(0, 4)]
+    assert post["coef"].mean() == pytest.approx(5.0, abs=0.6)
+
+
+def test_fuzzy_rd_recovers_known_ratio():
+    rng_state = 42
+    # First-stage variable jumps by 20, outcome jumps by 8 -> true LATE = 0.4
+    first_stage_panel = _synthetic_panel(true_jump=20.0, seed=rng_state).rename(columns={"y": "ai_interest_index"})
+    reduced_form_panel = _synthetic_panel(true_jump=8.0, seed=rng_state + 1).rename(columns={"y": "outcome"})
+    panel = first_stage_panel.merge(reduced_form_panel, on=["state", "year", "month"])
+
+    result = fuzzy_rd(panel, EVENT, outcome_col="outcome", running_metric_col="ai_interest_index", bandwidth=8)
+
+    assert result["first_stage_jump"] == pytest.approx(20.0, abs=1.5)
+    assert result["reduced_form_jump"] == pytest.approx(8.0, abs=1.5)
+    assert result["fuzzy_rd_late"] == pytest.approx(0.4, abs=0.1)
+
+
+def _stacked_fuzzy_rd_panel(events: list[Event], true_jump: float, seed: int = 0, bandwidth: int = 8) -> pd.DataFrame:
+    """Like _synthetic_panel (linear drift + jump, deliberately no
+    seasonal confound -- local-linear RD only nets out a local trend, not
+    seasonality) but pooled across several well-separated events: for
+    each (state, calendar month), use whichever event's own +/-bandwidth
+    window contains that month (safe since these events' windows don't
+    overlap) to decide the local event_time, drift, and jump; months
+    outside every event's window are dropped rather than kept as
+    unrelated noise rows."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            active_et = None
+            for event in events:
+                et = months_since(year, month, event)
+                if abs(et) <= bandwidth:
+                    active_et = et
+                    break
+            if active_et is None:
+                continue
+            trend = 0.1 * active_et
+            jump = true_jump if active_et >= 0 else 0.0
+            noise = rng.normal(0, 0.5)
+            rows.append({"state": state, "year": year, "month": month, "y": state_effect[state] + trend + jump + noise})
+    return pd.DataFrame(rows)
+
+
+def test_stacked_fuzzy_rd_recovers_known_ratio_with_tighter_se_than_single_event():
+    events = _well_separated_events()
+    rng_state = 42
+    # Same true jump sizes/ratio as test_fuzzy_rd_recovers_known_ratio, pooled across 3 events.
+    first_stage_panel = _stacked_fuzzy_rd_panel(events, true_jump=20.0, seed=rng_state).rename(columns={"y": "ai_interest_index"})
+    reduced_form_panel = _stacked_fuzzy_rd_panel(events, true_jump=8.0, seed=rng_state + 1).rename(columns={"y": "outcome"})
+    panel = first_stage_panel.merge(reduced_form_panel, on=["state", "year", "month"])
+
+    pooled = stacked_fuzzy_rd(panel, events, outcome_col="outcome", running_metric_col="ai_interest_index", bandwidth=8)
+
+    assert pooled["first_stage_jump"] == pytest.approx(20.0, abs=1.5)
+    assert pooled["reduced_form_jump"] == pytest.approx(8.0, abs=1.5)
+    assert pooled["fuzzy_rd_late"] == pytest.approx(0.4, abs=0.1)
+
+    # The whole point of pooling: a tighter LATE SE than any single event's own fuzzy_rd.py estimate.
+    single = fuzzy_rd(panel, events[0], outcome_col="outcome", running_metric_col="ai_interest_index", bandwidth=8)
+    assert pooled["fuzzy_rd_late_se_approx"] < single["fuzzy_rd_late_se_approx"]
+
+
+def test_event_time_bounds_trims_near_close_neighbors():
+    # Real production gaps: chatgpt_launch -> gpt4 is 4 months, gpt4o -> claude35_sonnet is 1 month.
+    lower, upper = event_time_bounds(EVENTS_BY_KEY["chatgpt_launch"], EVENTS, max_window=12)
+    assert lower == -12  # no earlier neighbor, so the fixed window applies
+    assert upper == 3  # capped just before gpt4's own month (4 months later)
+
+    lower, upper = event_time_bounds(EVENTS_BY_KEY["gpt4o"], EVENTS, max_window=12)
+    assert upper == 0  # claude35_sonnet is only 1 month later -- no post-period room at all
+
+
+def _well_separated_events() -> list[Event]:
+    """Three synthetic events far enough apart that a +/-6 window never
+    overlaps, each landing in a different calendar month -- so pooling
+    them should let calendar-month fixed effects be identified even
+    though a single event's window alone can't (see event_study.py)."""
+    return [
+        Event("e1", "Event 1", datetime.date(2020, 3, 15), "synthetic"),
+        Event("e2", "Event 2", datetime.date(2021, 9, 15), "synthetic"),
+        Event("e3", "Event 3", datetime.date(2023, 1, 15), "synthetic"),
+    ]
+
+
+def _stacked_synthetic_panel(events: list[Event], true_jump: float, seed: int = 0) -> pd.DataFrame:
+    """Unlike _synthetic_panel, this one DOES include a seasonal
+    (sinusoidal) confound -- the point of this test is to check that
+    pooling multiple events (landing in different calendar months) lets
+    the model separate that seasonality from the event-time jump, which a
+    single-event regression provably cannot do (see event_study.py's
+    docstring on why calendar-month FE is dropped there)."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            seasonal = 3.0 * np.sin(month / 12 * 2 * np.pi)
+            jump = 0.0
+            for event in events:
+                et = months_since(year, month, event)
+                if -6 <= et <= 6 and et >= 0:
+                    jump = true_jump
+            noise = rng.normal(0, 0.3)
+            rows.append({"state": state, "year": year, "month": month, "y": state_effect[state] + seasonal + jump + noise})
+    return pd.DataFrame(rows)
+
+
+def test_stacked_event_study_recovers_jump_and_identifies_seasonality():
+    events = _well_separated_events()
+    panel = _stacked_synthetic_panel(events, true_jump=6.0)
+
+    result = run_stacked_event_study(panel, events, "y", max_window=6)
+
+    post = result[result["event_time"].between(0, 6)]
+    assert post["coef"].mean() == pytest.approx(6.0, abs=0.5)
+
+    pre = result[result["event_time"].between(-6, -2)]
+    assert pre["coef"].mean() == pytest.approx(0.0, abs=0.5)
+
+
+def _weighted_synthetic_panel(events: list[Event], seed: int = 0) -> pd.DataFrame:
+    """Same 4-state/seasonal-confound structure as _stacked_synthetic_panel
+    (known to identify event-time coefficients correctly despite the
+    documented rank-deficiency quirk -- see stacked_event_study.py's
+    docstring), but two states get a big post-launch jump (10) and a
+    heavy weight (50), the other two get no jump and a light weight (1).
+    An unweighted average of the four states' own jumps (10, 10, 0, 0)
+    lands at 5.0; a 50:50:1:1-weighted average should land much closer
+    to 10, the heavy states' own jump."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+    state_jump = {"California": 10.0, "Texas": 10.0, "New York": 0.0, "Wyoming": 0.0}
+    state_weight = {"California": 50.0, "Texas": 50.0, "New York": 1.0, "Wyoming": 1.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            seasonal = 3.0 * np.sin(month / 12 * 2 * np.pi)
+            jump = 0.0
+            for event in events:
+                et = months_since(year, month, event)
+                if 0 <= et <= 6:
+                    jump = state_jump[state]
+            noise = rng.normal(0, 0.3)
+            rows.append(
+                {
+                    "state": state,
+                    "year": year,
+                    "month": month,
+                    "y": state_effect[state] + seasonal + jump + noise,
+                    "weight": state_weight[state],
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_stacked_event_study_weight_col_shifts_estimate_toward_heavier_rows():
+    events = _well_separated_events()
+    panel = _weighted_synthetic_panel(events)
+
+    unweighted = run_stacked_event_study(panel, events, "y", max_window=6)
+    weighted = run_stacked_event_study(panel, events, "y", max_window=6, weight_col="weight")
+
+    unweighted_post = unweighted[unweighted["event_time"].between(0, 6)]["coef"].mean()
+    weighted_post = weighted[weighted["event_time"].between(0, 6)]["coef"].mean()
+
+    # Unweighted: every state counts equally -> average of 10, 10, 0, 0.
+    assert unweighted_post == pytest.approx(5.0, abs=1.0)
+    # Weighted 50:50:1:1 toward the two jump=10 states -> much closer to
+    # 10 than to the unweighted 5.0 midpoint.
+    assert weighted_post == pytest.approx(10.0, abs=1.5)
+    assert weighted_post > unweighted_post + 2.0
+
+
+def test_stacked_event_study_weight_col_drops_non_positive_weights():
+    events = _well_separated_events()
+    panel = _weighted_synthetic_panel(events)
+    panel.loc[panel["state"].isin(["New York", "Wyoming"]), "weight"] = 0.0
+
+    # Should not raise, and should simply exclude the zero-weight rows,
+    # leaving an estimate dominated entirely by the two heavy (jump=10) states.
+    result = run_stacked_event_study(panel, events, "y", max_window=6, weight_col="weight")
+    post = result[result["event_time"].between(0, 6)]["coef"].mean()
+    assert post == pytest.approx(10.0, abs=1.5)
+
+
+def _event_impact_synthetic_panel(events: list[Event], event_impact: dict[str, float], seed: int = 0) -> pd.DataFrame:
+    """4 states with a seasonal confound (the known-working structure
+    from _stacked_synthetic_panel), but this time each EVENT (not each
+    state) has its own jump size, in both 'trend' (the impact/dose
+    column an event's own weight would be computed from) and 'y' (the
+    outcome) -- every state sees the same jump for a given event."""
+    rng = np.random.default_rng(seed)
+    states = ["California", "Texas", "New York", "Wyoming"]
+    state_effect = {"California": 10.0, "Texas": 5.0, "New York": 8.0, "Wyoming": 0.0}
+
+    start = min(e.date for e in events)
+    periods = pd.period_range(f"{start.year - 1}-01", periods=(max(e.date.year for e in events) - start.year + 3) * 12, freq="M")
+
+    rows = []
+    for state in states:
+        for period in periods:
+            year, month = period.year, period.month
+            seasonal = 3.0 * np.sin(month / 12 * 2 * np.pi)
+            trend = 0.0
+            jump = 0.0
+            for event in events:
+                et = months_since(year, month, event)
+                if 0 <= et <= 6:
+                    trend = event_impact[event.key]
+                    jump = event_impact[event.key]
+            noise = rng.normal(0, 0.3)
+            rows.append(
+                {
+                    "state": state,
+                    "year": year,
+                    "month": month,
+                    "trend": trend,
+                    "y": state_effect[state] + seasonal + jump + noise,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_compute_event_impact_weights_recovers_known_jump_sizes():
+    events = _well_separated_events()
+    impact = {"e1": 2.0, "e2": 5.0, "e3": 20.0}
+    panel = _event_impact_synthetic_panel(events, impact)
+
+    weights = compute_event_impact_weights(panel, events, impact_col="trend", bandwidth=6)
+
+    for key, expected in impact.items():
+        assert weights[key] == pytest.approx(expected, abs=0.5)
+
+
+def test_event_weights_shifts_pooled_estimate_toward_high_impact_events():
+    """e3's own outcome jump (20) is much bigger than e1's (2) or e2's
+    (5); an event-impact-weighted pooled estimate (weighted toward e3,
+    the biggest search-interest mover) should sit well above the
+    unweighted mean(2, 5, 20) = 9.0."""
+    events = _well_separated_events()
+    impact = {"e1": 2.0, "e2": 5.0, "e3": 20.0}
+    panel = _event_impact_synthetic_panel(events, impact)
+    weights = compute_event_impact_weights(panel, events, impact_col="trend", bandwidth=6)
+
+    unweighted = run_stacked_event_study(panel, events, "y", max_window=6)
+    weighted = run_stacked_event_study(panel, events, "y", max_window=6, event_weights=weights)
+
+    unweighted_post = unweighted[unweighted["event_time"].between(0, 6)]["coef"].mean()
+    weighted_post = weighted[weighted["event_time"].between(0, 6)]["coef"].mean()
+
+    assert unweighted_post == pytest.approx(9.0, abs=1.5)
+    assert weighted_post > unweighted_post + 1.0
+
+
+def test_run_stacked_event_study_rejects_incomplete_event_weights():
+    events = _well_separated_events()
+    panel = _event_impact_synthetic_panel(events, {"e1": 2.0, "e2": 5.0, "e3": 20.0})
+
+    with pytest.raises(ValueError, match="event_weights is missing"):
+        run_stacked_event_study(panel, events, "y", max_window=6, event_weights={"e1": 2.0, "e2": 5.0})

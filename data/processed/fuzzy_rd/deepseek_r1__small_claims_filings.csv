@@ -1,0 +1,2 @@
+event,event_label,event_date,outcome,running_metric,bandwidth_months,first_stage_jump,first_stage_se,first_stage_n,reduced_form_jump,reduced_form_se,reduced_form_n,fuzzy_rd_late,fuzzy_rd_late_se_approx
+deepseek_r1,DeepSeek R1 release,2025-01-20,small_claims_filings,ai_interest_index,6,3.4302441175227707,0.5158997628779941,663,646.8132077534349,576.7676785477377,26,188.56185903776023,170.5166710166224

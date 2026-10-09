@@ -1,0 +1,5 @@
+state,year,case_type,filings,dispositions,avg_time_to_disposition_days
+California,2024,Small Claims,150000,145000,62
+New York,2024,Small Claims,90000,88000,74
+New York,2023,Small Claims,95000,91000,80
+Texas,2024,Small Claims,110000,107000,55

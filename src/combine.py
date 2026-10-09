@@ -1,0 +1,280 @@
+"""Merge the fetched Google Trends and government-usage data into a single
+state x year panel at data/processed/combined_state_data.csv, covering
+2020 through the current year.
+
+This only reads files already present under data/raw/ -- it does no
+network access itself, so it can run anywhere (including this sandbox) as
+long as data/raw/ has been populated by the fetch_* scripts elsewhere.
+
+Coverage is inherently uneven: Trends data covers all 50 states + DC for
+whichever term/year combinations were successfully fetched; court-stats
+and parking-ticket data only cover whatever years/states/cities you
+fetched (parking data is city-level, e.g. NYC only, not a 50-state
+comparison); unemployment-insurance processing time (DOL ETA 9050) and its
+unemployment-rate control (BLS LAUS) cover all states once fetched.
+Missing values are left as NaN rather than silently dropped or
+interpolated, and a `data_coverage_notes` column flags which pieces are
+present for each (state, year) row.
+
+The unemployment_rate_avg column is a *control*, not a usage metric: UI
+first-payment processing time naturally gets worse when claim volume
+spikes (a state mid-recession looks "slower" for reasons unrelated to AI
+adoption or administrative competence), so any comparison of
+ui_pct_within_21_days / ui_avg_days_to_first_payment_approx across states
+or over time should control for unemployment_rate_avg rather than reading
+the raw numbers at face value.
+
+Usage:
+    python -m src.combine
+"""
+
+from __future__ import annotations
+
+import datetime
+from pathlib import Path
+
+import pandas as pd
+
+from src.trends.fetch_trends import DEFAULT_START_YEAR
+from src.us_states import US_STATE_TO_ABBR, normalize_state_name
+
+ROOT = Path(__file__).resolve().parent.parent
+TRENDS_DIR = ROOT / "data" / "raw" / "trends"
+COURT_STATS_DIR = ROOT / "data" / "raw" / "court_stats"
+TX_CARD_MONTHLY_PATH = COURT_STATS_DIR / "tx_justice_court_civil_month.csv"
+WA_CASELOAD_MONTHLY_PATH = COURT_STATS_DIR / "wa_small_claims_month.csv"
+PARKING_DIR = ROOT / "data" / "raw" / "parking_tickets"
+UNEMPLOYMENT_DIR = ROOT / "data" / "raw" / "unemployment"
+CONTROLS_DIR = ROOT / "data" / "raw" / "controls"
+OUTPUT_PATH = ROOT / "data" / "processed" / "combined_state_data.csv"
+
+ALL_STATES = pd.DataFrame({"state": list(US_STATE_TO_ABBR.keys())})
+
+
+def _load_trends_for_year(year_dir: Path) -> pd.DataFrame:
+    """Read every per-term CSV in a single year's trends directory and join
+    into one wide frame: state, <term_1>_interest, ..., ai_interest_index
+    (the row-wise mean across all terms successfully fetched for that year)."""
+    wide = ALL_STATES.set_index("state")
+    term_columns: list[str] = []
+
+    for csv_path in sorted(year_dir.glob("*.csv")):
+        df = pd.read_csv(csv_path, index_col=0)
+        if df.empty or df.shape[1] == 0:
+            continue
+        term = df.columns[0]
+        col_name = f"{term}_interest"
+        series = df[term].rename(col_name)
+        series.index = series.index.map(lambda s: normalize_state_name(s) or s)
+        wide = wide.join(series, how="left")
+        term_columns.append(col_name)
+
+    if term_columns:
+        wide["ai_interest_index"] = wide[term_columns].mean(axis=1, skipna=True)
+    else:
+        wide["ai_interest_index"] = pd.NA
+
+    return wide.reset_index().rename(columns={"index": "state"})
+
+
+def load_trends(trends_dir: Path = TRENDS_DIR) -> pd.DataFrame:
+    """Read data/raw/trends/<year>/<term>.csv for every fetched year and
+    concatenate into a state x year panel."""
+    if not trends_dir.exists():
+        return pd.DataFrame(columns=["state", "year", "ai_interest_index"])
+
+    year_dirs = sorted(p for p in trends_dir.iterdir() if p.is_dir() and p.name.isdigit())
+    frames = []
+    for year_dir in year_dirs:
+        year_df = _load_trends_for_year(year_dir)
+        year_df.insert(1, "year", int(year_dir.name))
+        frames.append(year_df)
+
+    if not frames:
+        return pd.DataFrame(columns=["state", "year", "ai_interest_index"])
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def load_court_stats(court_stats_dir: Path = COURT_STATS_DIR) -> pd.DataFrame:
+    """Read standardized court-stats CSVs (output of
+    fetch_court_stats.normalize_manual_export) and aggregate to one row per
+    (state, year): small-claims filings (summed across case-type rows, if
+    more than one) and average time-to-disposition."""
+    frames = [pd.read_csv(p) for p in court_stats_dir.glob("normalized_*.csv")]
+    if not frames:
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_avg_processing_days"])
+
+    df = pd.concat(frames, ignore_index=True)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    df["year"] = pd.to_numeric(df["year"], errors="coerce")
+
+    small_claims = df[df["case_type"].astype(str).str.contains("small claims", case=False, na=False)]
+    if small_claims.empty:
+        small_claims = df  # fall back to whatever case types are present
+
+    panel = small_claims.groupby(["state", "year"], as_index=False).agg(
+        small_claims_filings=("filings", "sum"),
+        small_claims_avg_processing_days=("avg_time_to_disposition_days", "mean"),
+    )
+    return panel
+
+
+def load_tx_small_claims_annual(tx_card_path: Path = TX_CARD_MONTHLY_PATH) -> pd.DataFrame:
+    """Roll up fetch_tx_card.py's monthly Texas small-claims data (one of
+    two sources in this project with genuine month-level resolution -- see
+    that module's docstring) to one row per year, in the same
+    small_claims_filings column load_court_stats produces, so the sources
+    combine rather than compete. avg_processing_days isn't available from
+    this source (only filing/disposition counts), so it's left NaN here."""
+    if not tx_card_path.exists():
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    df = pd.read_csv(tx_card_path)
+    small_claims = df[df["case_type"] == "Small Claims"]
+    if small_claims.empty:
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    return small_claims.groupby(["state", "year"], as_index=False).agg(
+        small_claims_filings=("filings", "sum"),
+        small_claims_dispositions=("dispositions", "sum"),
+    )
+
+
+def load_wa_small_claims_annual(wa_caseload_path: Path = WA_CASELOAD_MONTHLY_PATH) -> pd.DataFrame:
+    """Roll up fetch_wa_caseload.py's monthly Washington small-claims data
+    (the second source with genuine month-level resolution, found via a
+    broader 50-state search after Texas) to one row per year, same
+    small_claims_filings/small_claims_dispositions columns as the Texas
+    rollup above."""
+    if not wa_caseload_path.exists():
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    df = pd.read_csv(wa_caseload_path)
+    if df.empty:
+        return pd.DataFrame(columns=["state", "year", "small_claims_filings", "small_claims_dispositions"])
+    return df.groupby(["state", "year"], as_index=False).agg(
+        small_claims_filings=("filings", "sum"),
+        small_claims_dispositions=("dispositions", "sum"),
+    )
+
+
+def _merge_small_claims_source(court_stats: pd.DataFrame, source: pd.DataFrame) -> pd.DataFrame:
+    """Fold an automated monthly-source annual rollup (Texas, Washington,
+    ...) into court_stats' small_claims_filings column, filling gaps
+    rather than overwriting -- each source covers different states, so
+    this combines cleanly rather than competing."""
+    if source.empty:
+        return court_stats
+    if court_stats.empty:
+        return source
+    merged = court_stats.merge(source, on=["state", "year"], how="outer", suffixes=("", "_src"))
+    # pandas only appends "_src" to columns that actually overlap between
+    # the two frames (e.g. small_claims_dispositions on a second call,
+    # once an earlier source already added it) -- a column unique to
+    # `source` merges in under its own plain name with no suffix at all.
+    for col in ("small_claims_filings", "small_claims_dispositions"):
+        if f"{col}_src" in merged.columns:
+            merged[col] = merged[col].fillna(merged[f"{col}_src"])
+            merged = merged.drop(columns=[f"{col}_src"])
+    return merged
+
+
+def load_parking_tickets(parking_dir: Path = PARKING_DIR) -> pd.DataFrame:
+    """Read the yearly violation_status-count CSVs produced by
+    fetch_socrata.py and roll up to one row per (state, year):
+    total hearing+appeal ticket volume, and the subset that were actual
+    appeals (violation_status containing "APPEAL")."""
+    frames = [pd.read_csv(p) for p in parking_dir.glob("*.csv")]
+    if not frames:
+        return pd.DataFrame(columns=["state", "year", "parking_hearing_records", "parking_appeal_records"])
+
+    df = pd.concat(frames, ignore_index=True)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    is_appeal = df["violation_status"].astype(str).str.contains("APPEAL", case=False, na=False)
+    df["appeal_n"] = df["n"].where(is_appeal, 0)
+
+    panel = df.groupby(["state", "year"], as_index=False).agg(
+        parking_hearing_records=("n", "sum"),
+        parking_appeal_records=("appeal_n", "sum"),
+    )
+    return panel
+
+
+def load_unemployment(unemployment_dir: Path = UNEMPLOYMENT_DIR) -> pd.DataFrame:
+    """Read the state-year summary produced by fetch_unemployment.py
+    (DOL ETA 9050: UI first-payment processing time)."""
+    path = unemployment_dir / "eta9050_state_year.csv"
+    if not path.exists():
+        return pd.DataFrame(
+            columns=["state", "year", "ui_first_payments_total", "ui_pct_within_21_days", "ui_avg_days_to_first_payment_approx"]
+        )
+    df = pd.read_csv(path)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    return df
+
+
+def load_controls(controls_dir: Path = CONTROLS_DIR) -> pd.DataFrame:
+    """Read the state-year control variables produced by
+    fetch_bls_controls.py (currently: average unemployment rate). Kept
+    separate from the UI processing-time numbers above so it's clear this
+    is a covariate to control for, not part of the thing being measured."""
+    path = controls_dir / "bls_unemployment_rate.csv"
+    if not path.exists():
+        return pd.DataFrame(columns=["state", "year", "unemployment_rate_avg"])
+    df = pd.read_csv(path)
+    df["state"] = df["state"].map(lambda s: normalize_state_name(s) or s)
+    return df
+
+
+def coverage_note(row: pd.Series) -> str:
+    parts = [
+        "trends" if pd.notna(row.get("ai_interest_index")) else "no-trends",
+        "court-stats" if pd.notna(row.get("small_claims_filings")) else "no-court-stats",
+        "parking" if pd.notna(row.get("parking_hearing_records")) else "no-parking",
+        "unemployment" if pd.notna(row.get("ui_first_payments_total")) else "no-unemployment",
+        "controls" if pd.notna(row.get("unemployment_rate_avg")) else "no-controls",
+    ]
+    return ",".join(parts)
+
+
+def combine(
+    trends_dir: Path = TRENDS_DIR,
+    court_stats_dir: Path = COURT_STATS_DIR,
+    tx_card_path: Path = TX_CARD_MONTHLY_PATH,
+    wa_caseload_path: Path = WA_CASELOAD_MONTHLY_PATH,
+    parking_dir: Path = PARKING_DIR,
+    unemployment_dir: Path = UNEMPLOYMENT_DIR,
+    controls_dir: Path = CONTROLS_DIR,
+    output_path: Path = OUTPUT_PATH,
+    start_year: int = DEFAULT_START_YEAR,
+    end_year: int | None = None,
+) -> pd.DataFrame:
+    end_year = end_year or datetime.date.today().year
+
+    trends = load_trends(trends_dir)
+    court_stats = load_court_stats(court_stats_dir)
+    court_stats = _merge_small_claims_source(court_stats, load_tx_small_claims_annual(tx_card_path))
+    court_stats = _merge_small_claims_source(court_stats, load_wa_small_claims_annual(wa_caseload_path))
+    parking = load_parking_tickets(parking_dir)
+    unemployment = load_unemployment(unemployment_dir)
+    controls = load_controls(controls_dir)
+
+    years = pd.DataFrame({"year": range(start_year, end_year + 1)})
+    backbone = ALL_STATES.merge(years, how="cross")
+
+    combined = (
+        backbone.merge(trends, on=["state", "year"], how="left")
+        .merge(court_stats, on=["state", "year"], how="left")
+        .merge(parking, on=["state", "year"], how="left")
+        .merge(unemployment, on=["state", "year"], how="left")
+        .merge(controls, on=["state", "year"], how="left")
+    )
+    combined.insert(1, "state_abbr", combined["state"].map(US_STATE_TO_ABBR))
+    combined["data_coverage_notes"] = combined.apply(coverage_note, axis=1)
+    combined = combined.sort_values(["state", "year"]).reset_index(drop=True)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(output_path, index=False)
+    print(f"Wrote combined panel ({len(combined)} state-year rows, {start_year}-{end_year}) -> {output_path}")
+    return combined
+
+
+if __name__ == "__main__":
+    combine()

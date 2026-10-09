@@ -1,0 +1,10 @@
+violation_status,n,state,source_name,year,month
+HEARING HELD-GUILTY,96751,New York,NYC Open Parking and Camera Violations,2023,8
+HEARING HELD-GUILTY REDUCTION,67898,New York,NYC Open Parking and Camera Violations,2023,8
+HEARING HELD-NOT GUILTY,50995,New York,NYC Open Parking and Camera Violations,2023,8
+APPEAL AFFIRMED,4927,New York,NYC Open Parking and Camera Violations,2023,8
+HEARING ADJOURNMENT,3002,New York,NYC Open Parking and Camera Violations,2023,8
+APPEAL REVERSED,471,New York,NYC Open Parking and Camera Violations,2023,8
+HEARING PENDING,184,New York,NYC Open Parking and Camera Violations,2023,8
+APPEAL ABANDONED,78,New York,NYC Open Parking and Camera Violations,2023,8
+HEARING HELD-REINSTATEMENT,74,New York,NYC Open Parking and Camera Violations,2023,8
